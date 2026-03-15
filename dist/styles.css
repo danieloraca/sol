@@ -338,6 +338,38 @@ body {
   gap: 24px;
 }
 
+.player-video-shell {
+  position: absolute;
+  inset: 18px;
+  overflow: hidden;
+  border-radius: 24px;
+  background: #02060b;
+}
+
+.player-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  object-fit: cover;
+  background: #02060b;
+  cursor: pointer;
+}
+
+.player-screen.is-video .player-art {
+  inset: 0;
+  opacity: 0.16;
+}
+
+.player-screen.is-video .player-overlay,
+.player-screen.is-video .player-badges,
+.player-screen.is-video .player-progress {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+
 .player-badges,
 .hero-actions,
 .control-buttons {
@@ -422,6 +454,7 @@ body {
 .player-progress {
   display: grid;
   gap: 10px;
+  align-self: end;
 }
 
 .progress-bar {

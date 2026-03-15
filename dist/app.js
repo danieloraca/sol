@@ -17,9 +17,12 @@ let selectedItemId = null;
 let selectedStreams = [];
 let selectedLookup = null;
 let selectedStreamIndex = 0;
-let playbackPercent = 18;
+let playbackPercent = 0;
 let isPlaying = false;
-let playbackTimer = null;
+let playbackCurrentSeconds = 0;
+let playbackDurationSeconds = 0;
+let pendingSeekSeconds = null;
+let lastPlaybackError = "";
 
 async function bootstrap() {
   if (!invoke) {
@@ -121,16 +124,20 @@ function bindHeroButtons() {
 async function selectItem(id) {
   try {
     const item = await getItem(id);
+    resetPlaybackSession();
     selectedItemId = id;
     selectedLookup = await invoke("get_stream_lookup", { id });
     selectedStreams = selectedLookup.streams ?? [];
     selectedStreamIndex = 0;
-    playbackPercent = defaultProgressFor(item);
-    setPlaybackState(false);
+    playbackPercent = 0;
+    playbackCurrentSeconds = 0;
+    playbackDurationSeconds = estimateRuntimeSeconds(item);
+    lastPlaybackError = "";
     if (selectedStreams.length > 0) {
       renderPlayer(item);
       renderStreams(item.title);
     } else {
+      setPlaybackState(false);
       renderNoStreams(item, selectedLookup);
     }
   } catch (error) {
@@ -155,31 +162,36 @@ function renderPlayer(item) {
   }
 
   const activeStream = selectedStreams[selectedStreamIndex];
-  const progressWidth = `${Math.round(playbackPercent)}%`;
+  const escapedPoster = item.poster_url ? `poster="${escapeHtml(item.poster_url)}"` : "";
 
   playerStageEl.innerHTML = `
-    <div class="player-screen">
-      <div class="player-art ${item.poster_url ? "" : "is-fallback"}">
-        ${renderPosterImage(item, "player-poster")}
+    <div class="player-screen is-video">
+      <div class="player-video-shell ${item.poster_url ? "" : "is-fallback"}">
+        <div class="player-art ${item.poster_url ? "" : "is-fallback"}">
+          ${renderPosterImage(item, "player-poster")}
+        </div>
+        <video id="player-video" class="player-video" preload="metadata" playsinline ${escapedPoster}>
+          <source src="${escapeHtml(activeStream.url)}" />
+        </video>
       </div>
       <div class="player-badges">
         <span class="badge">${item.media_type}</span>
         <span class="badge">${item.year}</span>
         <span class="badge">${activeStream.quality}</span>
-        <span class="badge">${isPlaying ? "Playing now" : "Paused"}</span>
+        <span class="badge" id="player-status-badge">${isPlaying ? "Playing now" : "Paused"}</span>
       </div>
 
       <div class="player-overlay">
         <p class="eyebrow">Player</p>
         <h2>${item.title}</h2>
         <p>${item.description}</p>
-        <p class="player-subtitle">${item.genres.join(" / ")} • Source: ${activeStream.name} • Language: ${activeStream.language}</p>
+        <p class="player-subtitle" id="player-subtitle">${item.genres.join(" / ")} • Source: ${activeStream.name} • Language: ${activeStream.language}</p>
       </div>
 
       <div class="player-progress">
-        <div class="progress-meta">${formatPlaybackTime(playbackPercent, item)}</div>
+        <div class="progress-meta" id="progress-meta">${formatPlaybackTime(item)}</div>
         <div class="progress-bar">
-          <div class="progress-value" style="width: ${progressWidth}"></div>
+          <div class="progress-value" id="progress-value" style="width: ${Math.round(playbackPercent)}%"></div>
         </div>
       </div>
     </div>
@@ -196,9 +208,14 @@ function renderPlayer(item) {
       <p class="eyebrow">Playback controls</p>
       <div class="control-row">
         <button class="control-button" data-player-action="rewind">-10s</button>
-        <button class="control-button" data-player-action="toggle">${isPlaying ? "Pause" : "Play"}</button>
+        <button class="control-button" data-player-action="toggle" id="toggle-playback">${isPlaying ? "Pause" : "Play"}</button>
         <button class="control-button" data-player-action="forward">+30s</button>
       </div>
+    </article>
+
+    <article class="player-details-card">
+      <p class="eyebrow">Stream status</p>
+      <p id="stream-status-message">${selectedLookup?.message ?? `Ready to play from ${activeStream.name}.`}</p>
     </article>
 
     <article class="player-details-card">
@@ -211,6 +228,8 @@ function renderPlayer(item) {
   `;
 
   bindPlayerActions(item);
+  mountPlayer(item, activeStream);
+  syncPlayerUi(item, activeStream);
 }
 
 function bindPlayerActions(item) {
@@ -225,17 +244,28 @@ function handlePlayerAction(action, item) {
   if (action === "toggle") {
     setPlaybackState(!isPlaying);
   } else if (action === "rewind") {
-    playbackPercent = Math.max(0, playbackPercent - 3);
+    seekPlayer(-10);
   } else if (action === "forward") {
-    playbackPercent = Math.min(100, playbackPercent + 7);
+    seekPlayer(30);
   } else if (action === "restart") {
-    playbackPercent = 0;
+    seekPlayerTo(0);
   } else if (action === "next-source" && selectedStreams.length > 0) {
+    const resumeAt = getCurrentPlaybackSeconds();
+    const shouldResume = isPlaying;
     selectedStreamIndex = (selectedStreamIndex + 1) % selectedStreams.length;
+    pendingSeekSeconds = resumeAt;
+    lastPlaybackError = "";
+    setPlaybackState(false);
+    renderPlayer(item);
+    renderStreams(item.title);
+
+    if (shouldResume) {
+      setPlaybackState(true);
+    }
+    return;
   }
 
-  renderPlayer(item);
-  renderStreams(item.title);
+  syncPlayerUi(item, activeStreamForSelection());
 }
 
 function renderStreams(title) {
@@ -270,10 +300,18 @@ function renderStreams(title) {
 
   streamsEl.querySelectorAll("[data-stream-index]").forEach((button) => {
     button.addEventListener("click", async () => {
+      const resumeAt = getCurrentPlaybackSeconds();
+      const shouldResume = isPlaying;
       selectedStreamIndex = Number(button.dataset.streamIndex);
       const item = await getItem(selectedItemId);
+      pendingSeekSeconds = resumeAt;
+      setPlaybackState(false);
       renderPlayer(item);
       renderStreams(item.title);
+
+      if (shouldResume) {
+        setPlaybackState(true);
+      }
     });
   });
 }
@@ -347,73 +385,236 @@ function cacheItems(items) {
   items.forEach((item) => itemCache.set(item.id, item));
 }
 
-function defaultProgressFor(item) {
-  if (item.media_type === "channel") {
-    return 64;
-  }
-
-  if (item.media_type === "series") {
-    return 42;
-  }
-
-  return 18;
-}
-
 function setPlaybackState(nextState) {
   isPlaying = nextState;
+  const video = document.querySelector("#player-video");
 
-  if (playbackTimer) {
-    window.clearInterval(playbackTimer);
-    playbackTimer = null;
+  if (video) {
+    if (isPlaying) {
+      video.play().catch((error) => {
+        isPlaying = false;
+        lastPlaybackError = `Playback could not start: ${error.message ?? error}`;
+        syncPlayerUi(currentItem(), activeStreamForSelection());
+      });
+    } else {
+      video.pause();
+    }
+  } else if (isPlaying) {
+    isPlaying = false;
   }
 
-  if (!isPlaying) {
+  syncPlayerUi(currentItem(), activeStreamForSelection());
+}
+
+function mountPlayer(item, stream) {
+  const video = document.querySelector("#player-video");
+  if (!video) {
     return;
   }
 
-  playbackTimer = window.setInterval(async () => {
-    if (!selectedItemId) {
-      return;
+  video.addEventListener("click", () => {
+    setPlaybackState(!isPlaying);
+  });
+
+  const initialSeekSeconds = pendingSeekSeconds;
+  video.addEventListener("loadedmetadata", () => {
+    playbackDurationSeconds = Number.isFinite(video.duration) && video.duration > 0
+      ? video.duration
+      : estimateRuntimeSeconds(item);
+
+    if (initialSeekSeconds !== null) {
+      video.currentTime = Math.min(initialSeekSeconds, playbackDurationSeconds || initialSeekSeconds);
+      pendingSeekSeconds = null;
     }
 
-    playbackPercent = Math.min(100, playbackPercent + 0.6);
-    const item = await getItem(selectedItemId);
-    renderPlayer(item);
+    syncPlaybackFromVideo(item, stream, video);
+  });
 
-    if (playbackPercent >= 100) {
-      setPlaybackState(false);
-      renderPlayer(item);
+  video.addEventListener("timeupdate", () => {
+    syncPlaybackFromVideo(item, stream, video);
+  });
+
+  video.addEventListener("play", () => {
+    isPlaying = true;
+    lastPlaybackError = "";
+    syncPlaybackFromVideo(item, stream, video);
+  });
+
+  video.addEventListener("pause", () => {
+    if (!video.ended) {
+      isPlaying = false;
+      syncPlaybackFromVideo(item, stream, video);
     }
-  }, 1000);
+  });
+
+  video.addEventListener("ended", () => {
+    isPlaying = false;
+    playbackCurrentSeconds = playbackDurationSeconds || video.duration || playbackCurrentSeconds;
+    playbackPercent = 100;
+    syncPlayerUi(item, stream);
+  });
+
+  video.addEventListener("error", () => {
+    isPlaying = false;
+    lastPlaybackError = "The selected stream could not be loaded in the embedded player.";
+    syncPlayerUi(item, stream);
+  });
+
+  syncPlayerUi(item, stream);
 }
 
-function formatPlaybackTime(percent, item) {
-  const totalMinutes = estimateRuntimeMinutes(item);
-  const elapsedMinutes = Math.round((percent / 100) * totalMinutes);
-  return `${isPlaying ? "Playing" : "Paused"} • ${formatMinutes(elapsedMinutes)} / ${formatMinutes(totalMinutes)}`;
+function syncPlaybackFromVideo(item, stream, video) {
+  playbackCurrentSeconds = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+  playbackDurationSeconds = Number.isFinite(video.duration) && video.duration > 0
+    ? video.duration
+    : estimateRuntimeSeconds(item);
+  playbackPercent = playbackDurationSeconds > 0
+    ? Math.min(100, (playbackCurrentSeconds / playbackDurationSeconds) * 100)
+    : 0;
+  syncPlayerUi(item, stream);
 }
 
-function estimateRuntimeMinutes(item) {
+function syncPlayerUi(item, stream) {
+  if (!item || !stream) {
+    return;
+  }
+
+  const statusBadge = document.querySelector("#player-status-badge");
+  const subtitle = document.querySelector("#player-subtitle");
+  const progressMeta = document.querySelector("#progress-meta");
+  const progressValue = document.querySelector("#progress-value");
+  const toggleButton = document.querySelector("#toggle-playback");
+  const streamStatusMessage = document.querySelector("#stream-status-message");
+
+  if (statusBadge) {
+    statusBadge.textContent = playbackStatusLabel();
+  }
+
+  if (subtitle) {
+    subtitle.textContent = `${item.genres.join(" / ")} • Source: ${stream.name} • Language: ${stream.language}`;
+  }
+
+  if (progressMeta) {
+    progressMeta.textContent = formatPlaybackTime(item);
+  }
+
+  if (progressValue) {
+    progressValue.style.width = `${Math.round(playbackPercent)}%`;
+  }
+
+  if (toggleButton) {
+    toggleButton.textContent = isPlaying ? "Pause" : "Play";
+  }
+
+  if (streamStatusMessage) {
+    streamStatusMessage.textContent = lastPlaybackError || selectedLookup?.message || `Ready to play from ${stream.name}.`;
+  }
+}
+
+function playbackStatusLabel() {
+  if (lastPlaybackError) {
+    return "Playback issue";
+  }
+
+  if (isPlaying) {
+    return "Playing now";
+  }
+
+  if (playbackPercent >= 100) {
+    return "Ended";
+  }
+
+  return "Paused";
+}
+
+function seekPlayer(deltaSeconds) {
+  const video = document.querySelector("#player-video");
+  const nextTime = getCurrentPlaybackSeconds() + deltaSeconds;
+  seekPlayerTo(nextTime, video);
+}
+
+function seekPlayerTo(targetSeconds, video = document.querySelector("#player-video")) {
+  const item = currentItem();
+  const stream = activeStreamForSelection();
+  if (!item || !stream) {
+    return;
+  }
+
+  const duration = playbackDurationSeconds || estimateRuntimeSeconds(item);
+  const boundedTime = Math.max(0, Math.min(targetSeconds, duration || targetSeconds));
+
+  playbackCurrentSeconds = boundedTime;
+  playbackPercent = duration > 0 ? Math.min(100, (boundedTime / duration) * 100) : 0;
+
+  if (video) {
+    video.currentTime = boundedTime;
+  }
+
+  syncPlayerUi(item, stream);
+}
+
+function getCurrentPlaybackSeconds() {
+  const video = document.querySelector("#player-video");
+  if (video && Number.isFinite(video.currentTime)) {
+    return video.currentTime;
+  }
+
+  return playbackCurrentSeconds;
+}
+
+function currentItem() {
+  return selectedItemId ? itemCache.get(selectedItemId) ?? null : null;
+}
+
+function activeStreamForSelection() {
+  return selectedStreams[selectedStreamIndex] ?? null;
+}
+
+function resetPlaybackSession() {
+  const video = document.querySelector("#player-video");
+  if (video) {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+  }
+
+  isPlaying = false;
+  playbackCurrentSeconds = 0;
+  playbackDurationSeconds = 0;
+  playbackPercent = 0;
+  pendingSeekSeconds = null;
+  lastPlaybackError = "";
+}
+
+function formatPlaybackTime(item) {
+  const totalSeconds = playbackDurationSeconds || estimateRuntimeSeconds(item);
+  const elapsedSeconds = Math.min(playbackCurrentSeconds, totalSeconds || playbackCurrentSeconds);
+  return `${playbackStatusLabel()} • ${formatDuration(elapsedSeconds)} / ${formatDuration(totalSeconds)}`;
+}
+
+function estimateRuntimeSeconds(item) {
   if (item.media_type === "channel") {
-    return 180;
+    return 180 * 60;
   }
 
   if (item.media_type === "series") {
-    return 52;
+    return 52 * 60;
   }
 
-  return 124;
+  return 124 * 60;
 }
 
-function formatMinutes(totalMinutes) {
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
+function formatDuration(totalSeconds) {
+  const roundedSeconds = Math.max(0, Math.round(totalSeconds || 0));
+  const hours = Math.floor(roundedSeconds / 3600);
+  const minutes = Math.floor((roundedSeconds % 3600) / 60);
+  const seconds = roundedSeconds % 60;
 
   if (hours === 0) {
-    return `${minutes}m`;
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
   }
 
-  return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function renderCard(item) {
