@@ -80,7 +80,7 @@ For TMDB-backed movie items, the app now:
 3. Picks the largest video file in the best match.
 4. Requests a TorBox stream URL for that file.
 
-If TorBox has no matching item yet, the app falls back to the seeded demo stream data for demo-only titles.
+If TorBox has no matching item yet, the app now shows a clearer “no stream yet” state with the closest matches it found in your current TorBox library.
 
 ## Suggested next steps
 
