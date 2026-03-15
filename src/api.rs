@@ -18,6 +18,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/", get(index))
         .route("/health", get(health))
         .route("/api/home", get(home))
+        .route("/api/addons", get(addons))
         .route("/api/catalog", get(catalog))
         .route("/api/meta/{id}", get(meta))
         .route("/api/search", get(search))
@@ -35,6 +36,7 @@ async fn index() -> Json<ApiMessage> {
         routes: vec![
             "/health",
             "/api/home",
+            "/api/addons",
             "/api/catalog?type=movie|series|channel",
             "/api/meta/{id}",
             "/api/search?q=atlas",
@@ -49,6 +51,10 @@ async fn health() -> StatusCode {
 
 async fn home(State(state): State<AppState>) -> Json<crate::domain::HomeFeed> {
     Json(state.home_feed())
+}
+
+async fn addons(State(state): State<AppState>) -> Json<Vec<crate::domain::AddonDescriptor>> {
+    Json(state.addons())
 }
 
 async fn catalog(

@@ -461,6 +461,10 @@ impl TorboxStreamProvider {
         }
     }
 
+    pub fn is_configured(&self) -> bool {
+        self.api_key.is_some()
+    }
+
     fn auth_header(&self) -> Option<HeaderValue> {
         let token = self.api_key.as_ref()?;
         bearer_header(token)
@@ -759,7 +763,7 @@ impl ProwlarrSourceProvider {
         }
     }
 
-    fn is_configured(&self) -> bool {
+    pub fn is_configured(&self) -> bool {
         self.base_url.is_some() && self.api_key.is_some()
     }
 

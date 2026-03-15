@@ -2,7 +2,8 @@ use tauri::Manager;
 
 use crate::{
     domain::{
-        AcquisitionResult, HomeFeed, MediaItem, SourceSearchResult, StreamLookup, StreamSource,
+        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, SourceSearchResult, StreamLookup,
+        StreamSource,
     },
     state::AppState,
 };
@@ -10,6 +11,11 @@ use crate::{
 #[tauri::command]
 fn get_home_feed(state: tauri::State<'_, AppState>) -> HomeFeed {
     state.home_feed()
+}
+
+#[tauri::command]
+fn get_addons(state: tauri::State<'_, AppState>) -> Vec<AddonDescriptor> {
+    state.addons()
 }
 
 #[tauri::command]
@@ -81,6 +87,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_addons,
             get_home_feed,
             get_catalog,
             search_catalog,

@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::{
     domain::{
-        AcquisitionResult, HomeFeed, MediaItem, MediaType, SourceSearchResult, StreamLookup,
-        StreamSource,
+        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, MediaType, SourceSearchResult,
+        StreamLookup, StreamSource,
     },
     services::AppServices,
 };
@@ -55,5 +55,9 @@ impl AppState {
 
     pub fn search_sources(&self, id: &str) -> Option<SourceSearchResult> {
         self.services.search_sources(id)
+    }
+
+    pub fn addons(&self) -> Vec<AddonDescriptor> {
+        self.services.addons()
     }
 }

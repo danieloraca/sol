@@ -59,6 +59,24 @@ pub struct SourceSearchResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AddonTransport {
+    Builtin,
+    Remote,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AddonDescriptor {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub transport: AddonTransport,
+    pub configured: bool,
+    pub capabilities: Vec<String>,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MediaItem {
     pub id: String,
     pub title: String,

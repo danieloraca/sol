@@ -1,70 +1,50 @@
 use std::sync::Arc;
 
 use crate::{
+    addons::AddonRegistry,
     domain::{
-        AcquisitionResult, HomeFeed, MediaItem, MediaType, SourceSearchResult, StreamLookup,
-        StreamSource,
-    },
-    providers::{
-        FallbackMetadataProvider, FallbackStreamProvider, MetadataProvider, ProwlarrSourceProvider,
-        SeededLibraryProvider, SourceSearchProvider, StreamProvider, TmdbMetadataProvider,
-        TorboxStreamProvider,
+        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, MediaType, SourceSearchResult,
+        StreamLookup, StreamSource,
     },
 };
 
 #[derive(Clone)]
 pub struct AppServices {
-    metadata: Arc<dyn MetadataProvider>,
-    streams: Arc<dyn StreamProvider>,
-    torbox: Arc<TorboxStreamProvider>,
-    source_search: Arc<dyn SourceSearchProvider>,
+    addons: Arc<AddonRegistry>,
 }
 
 impl AppServices {
     pub fn demo() -> Self {
-        let seeded = Arc::new(SeededLibraryProvider::demo());
-        let metadata: Arc<dyn MetadataProvider> = TmdbMetadataProvider::from_env()
-            .map(|provider| {
-                Arc::new(FallbackMetadataProvider::new(Arc::new(provider), seeded.clone()))
-                    as Arc<dyn MetadataProvider>
-            })
-            .unwrap_or_else(|| seeded.clone());
-        let torbox = Arc::new(TorboxStreamProvider::from_env());
-        let streams = Arc::new(FallbackStreamProvider::new(torbox.clone(), seeded.clone()));
-
         Self {
-            metadata,
-            streams,
-            torbox,
-            source_search: Arc::new(ProwlarrSourceProvider::from_env()),
+            addons: Arc::new(AddonRegistry::builtin()),
         }
     }
 
     pub fn home_feed(&self) -> HomeFeed {
-        self.metadata.home_feed()
+        self.addons.home_feed()
     }
 
     pub fn catalog(&self, media_type: Option<MediaType>) -> Vec<MediaItem> {
-        self.metadata.catalog(media_type)
+        self.addons.catalog(media_type)
     }
 
     pub fn search(&self, query: &str) -> Vec<MediaItem> {
-        self.metadata.search(query)
+        self.addons.search(query)
     }
 
     pub fn item(&self, id: &str) -> Option<MediaItem> {
-        self.metadata.item(id)
+        self.addons.item(id)
     }
 
     pub fn streams(&self, id: &str) -> Option<Vec<StreamSource>> {
-        let item = self.metadata.item(id)?;
-        let lookup = self.streams.lookup(&item);
+        let item = self.addons.item(id)?;
+        let lookup = self.addons.stream_lookup(&item);
         (!lookup.streams.is_empty()).then_some(lookup.streams)
     }
 
     pub fn stream_lookup(&self, id: &str) -> Option<StreamLookup> {
-        let item = self.metadata.item(id)?;
-        Some(self.streams.lookup(&item))
+        let item = self.addons.item(id)?;
+        Some(self.addons.stream_lookup(&item))
     }
 
     pub fn submit_torbox_magnet(
@@ -73,12 +53,16 @@ impl AppServices {
         magnet: &str,
         only_if_cached: bool,
     ) -> Option<AcquisitionResult> {
-        let item = self.metadata.item(id)?;
-        Some(self.torbox.submit_magnet(&item, magnet, only_if_cached))
+        let item = self.addons.item(id)?;
+        Some(self.addons.submit_magnet(&item, magnet, only_if_cached))
     }
 
     pub fn search_sources(&self, id: &str) -> Option<SourceSearchResult> {
-        let item = self.metadata.item(id)?;
-        Some(self.source_search.search(&item))
+        let item = self.addons.item(id)?;
+        Some(self.addons.source_search(&item))
+    }
+
+    pub fn addons(&self) -> Vec<AddonDescriptor> {
+        self.addons.descriptors()
     }
 }

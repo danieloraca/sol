@@ -1,3 +1,4 @@
+pub mod addons;
 pub mod api;
 pub mod desktop;
 pub mod domain;
