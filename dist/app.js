@@ -47,14 +47,17 @@ async function renderHome() {
   cacheItems([homeFeed.hero, ...homeFeed.trending, ...homeFeed.continue_watching]);
 
   heroEl.innerHTML = `
-    <div class="hero-copy">
-      <p class="eyebrow">Featured</p>
-      <h2>${homeFeed.hero.title}</h2>
-      <p>${homeFeed.hero.description}</p>
-      <p class="meta">${homeFeed.hero.year} • ${homeFeed.hero.media_type} • ${homeFeed.hero.genres.join(" / ")}</p>
-      <div class="hero-actions">
-        <button class="primary-button" data-play-hero="${homeFeed.hero.id}">Play featured</button>
-        <button class="ghost-button" data-open-hero="${homeFeed.hero.id}">Open player</button>
+    <div class="hero-media ${homeFeed.hero.poster_url ? "" : "is-fallback"}">
+      ${renderPosterImage(homeFeed.hero, "hero-poster")}
+      <div class="hero-copy">
+        <p class="eyebrow">Featured</p>
+        <h2>${homeFeed.hero.title}</h2>
+        <p>${homeFeed.hero.description}</p>
+        <p class="meta">${homeFeed.hero.year} • ${homeFeed.hero.media_type} • ${homeFeed.hero.genres.join(" / ")}</p>
+        <div class="hero-actions">
+          <button class="primary-button" data-play-hero="${homeFeed.hero.id}">Play featured</button>
+          <button class="ghost-button" data-open-hero="${homeFeed.hero.id}">Open player</button>
+        </div>
       </div>
     </div>
   `;
@@ -156,6 +159,9 @@ function renderPlayer(item) {
 
   playerStageEl.innerHTML = `
     <div class="player-screen">
+      <div class="player-art ${item.poster_url ? "" : "is-fallback"}">
+        ${renderPosterImage(item, "player-poster")}
+      </div>
       <div class="player-badges">
         <span class="badge">${item.media_type}</span>
         <span class="badge">${item.year}</span>
@@ -279,6 +285,9 @@ function renderNoStreams(item, lookup) {
 
   playerStageEl.innerHTML = `
     <div class="player-screen">
+      <div class="player-art ${item.poster_url ? "" : "is-fallback"}">
+        ${renderPosterImage(item, "player-poster")}
+      </div>
       <div class="player-badges">
         <span class="badge">${item.media_type}</span>
         <span class="badge">${item.year}</span>
@@ -411,7 +420,10 @@ function renderCard(item) {
   return `
     <article class="card">
       <button data-id="${item.id}">
-        <div class="poster">${item.media_type}</div>
+        <div class="poster ${item.poster_url ? "" : "is-fallback"}">
+          ${renderPosterImage(item, "poster-image")}
+          <span class="poster-label">${item.media_type}</span>
+        </div>
         <h3>${item.title}</h3>
         <p class="meta">${item.year} • ${item.genres.join(" / ")}</p>
         <p>${item.description}</p>
@@ -419,6 +431,23 @@ function renderCard(item) {
       </button>
     </article>
   `;
+}
+
+function renderPosterImage(item, className) {
+  if (!item.poster_url) {
+    return "";
+  }
+
+  return `<img class="${className}" src="${item.poster_url}" alt="${escapeHtml(item.title)} poster" loading="lazy" />`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function renderShellError(message) {
