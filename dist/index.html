@@ -33,6 +33,26 @@
             placeholder="Try atlas, ambient, sci-fi..."
           />
         </label>
+
+        <section class="addon-manager">
+          <div class="section-heading">
+            <p class="eyebrow">Addons</p>
+            <h2>Install URLs</h2>
+          </div>
+          <label class="search">
+            <span>Manifest URL</span>
+            <input
+              id="addon-url"
+              type="url"
+              placeholder="https://example.com/manifest.json"
+            />
+          </label>
+          <div class="control-buttons">
+            <button class="primary-button" id="install-addon">Install addon</button>
+          </div>
+          <p id="addon-feedback" class="meta"></p>
+          <div id="addons-list" class="addon-list"></div>
+        </section>
       </aside>
 
       <main class="content">

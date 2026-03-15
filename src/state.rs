@@ -60,4 +60,8 @@ impl AppState {
     pub fn addons(&self) -> Vec<AddonDescriptor> {
         self.services.addons()
     }
+
+    pub fn install_addon_url(&self, manifest_url: &str) -> Result<AddonDescriptor, String> {
+        self.services.install_addon_url(manifest_url)
+    }
 }

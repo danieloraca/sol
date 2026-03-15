@@ -8,6 +8,10 @@ const continueWatchingEl = document.querySelector("#continue-watching");
 const catalogEl = document.querySelector("#catalog");
 const streamsEl = document.querySelector("#streams");
 const searchEl = document.querySelector("#search");
+const addonUrlEl = document.querySelector("#addon-url");
+const installAddonButtonEl = document.querySelector("#install-addon");
+const addonFeedbackEl = document.querySelector("#addon-feedback");
+const addonsListEl = document.querySelector("#addons-list");
 const filterButtons = [...document.querySelectorAll(".filter")];
 const TORBOX_AUTO_REFRESH_INTERVAL_MS = 5000;
 const TORBOX_AUTO_REFRESH_MAX_ATTEMPTS = 24;
@@ -31,6 +35,7 @@ let torboxCachedOnly = true;
 let torboxAutoRefreshTimer = null;
 let torboxAutoRefreshAttempt = 0;
 let sourceSearchState = null;
+let installedAddons = [];
 
 async function bootstrap() {
   if (!invoke) {
@@ -40,6 +45,7 @@ async function bootstrap() {
 
   await renderHome();
   await renderCatalog();
+  await renderAddons();
   await selectItem(homeFeed.hero.id);
 
   searchEl.addEventListener("input", handleSearch);
@@ -50,6 +56,31 @@ async function bootstrap() {
       searchEl.value = "";
       await renderCatalog();
     });
+  });
+
+  installAddonButtonEl?.addEventListener("click", async () => {
+    const manifestUrl = addonUrlEl?.value?.trim() ?? "";
+    if (!manifestUrl) {
+      addonFeedbackEl.textContent = "Paste a manifest URL first.";
+      return;
+    }
+
+    addonFeedbackEl.textContent = "Installing addon...";
+
+    try {
+      const descriptor = await invoke("install_addon_url", { manifestUrl });
+      addonFeedbackEl.textContent = `Installed ${descriptor.name}. Reloading catalog...`;
+      addonUrlEl.value = "";
+      await renderAddons();
+      await renderHome();
+      await renderCatalog();
+      if (homeFeed?.hero?.id) {
+        await selectItem(homeFeed.hero.id);
+      }
+      addonFeedbackEl.textContent = `Installed ${descriptor.name}.`;
+    } catch (error) {
+      addonFeedbackEl.textContent = String(error);
+    }
   });
 }
 
@@ -88,6 +119,26 @@ async function renderCatalog() {
   cacheItems(items);
   catalogEl.innerHTML = items.map(renderCard).join("");
   bindCatalogButtons(catalogEl);
+}
+
+async function renderAddons() {
+  installedAddons = await invoke("get_addons");
+  addonsListEl.innerHTML = installedAddons
+    .map(
+      (addon) => `
+        <article class="addon-card">
+          <div class="addon-card-copy">
+            <h3>${escapeHtml(addon.name)}</h3>
+            <p class="meta">${escapeHtml(addon.id)} • ${escapeHtml(addon.transport)}</p>
+            <p class="meta">${escapeHtml(addon.capabilities.join(" / "))}</p>
+          </div>
+          <span class="provider-badge ${addon.configured ? "is-success" : "is-error"}">
+            ${addon.configured ? "Configured" : "Needs setup"}
+          </span>
+        </article>
+      `,
+    )
+    .join("");
 }
 
 async function handleSearch(event) {

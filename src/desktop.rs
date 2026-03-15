@@ -19,6 +19,14 @@ fn get_addons(state: tauri::State<'_, AppState>) -> Vec<AddonDescriptor> {
 }
 
 #[tauri::command]
+fn install_addon_url(
+    state: tauri::State<'_, AppState>,
+    manifest_url: String,
+) -> Result<AddonDescriptor, String> {
+    state.install_addon_url(&manifest_url)
+}
+
+#[tauri::command]
 fn get_catalog(state: tauri::State<'_, AppState>, media_type: Option<String>) -> Vec<MediaItem> {
     state.catalog(media_type.as_ref().and_then(|raw| parse_media_type(raw)))
 }
@@ -88,6 +96,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_addons,
+            install_addon_url,
             get_home_feed,
             get_catalog,
             search_catalog,
