@@ -1,7 +1,9 @@
 use tauri::Manager;
 
 use crate::{
-    domain::{AcquisitionResult, HomeFeed, MediaItem, StreamLookup, StreamSource},
+    domain::{
+        AcquisitionResult, HomeFeed, MediaItem, SourceSearchResult, StreamLookup, StreamSource,
+    },
     state::AppState,
 };
 
@@ -59,6 +61,16 @@ fn submit_torbox_magnet(
         .ok_or_else(|| format!("No media item found for {id}"))
 }
 
+#[tauri::command]
+fn search_sources(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<SourceSearchResult, String> {
+    state
+        .search_sources(&id)
+        .ok_or_else(|| format!("No media item found for {id}"))
+}
+
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::demo())
@@ -75,7 +87,8 @@ pub fn run() {
             get_media_item,
             get_stream_lookup,
             get_streams,
-            submit_torbox_magnet
+            submit_torbox_magnet,
+            search_sources
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Sol desktop application");

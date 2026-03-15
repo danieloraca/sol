@@ -1,10 +1,14 @@
 use std::sync::Arc;
 
 use crate::{
-    domain::{AcquisitionResult, HomeFeed, MediaItem, MediaType, StreamLookup, StreamSource},
+    domain::{
+        AcquisitionResult, HomeFeed, MediaItem, MediaType, SourceSearchResult, StreamLookup,
+        StreamSource,
+    },
     providers::{
-        FallbackMetadataProvider, FallbackStreamProvider, MetadataProvider, SeededLibraryProvider,
-        StreamProvider, TmdbMetadataProvider, TorboxStreamProvider,
+        FallbackMetadataProvider, FallbackStreamProvider, MetadataProvider, ProwlarrSourceProvider,
+        SeededLibraryProvider, SourceSearchProvider, StreamProvider, TmdbMetadataProvider,
+        TorboxStreamProvider,
     },
 };
 
@@ -13,6 +17,7 @@ pub struct AppServices {
     metadata: Arc<dyn MetadataProvider>,
     streams: Arc<dyn StreamProvider>,
     torbox: Arc<TorboxStreamProvider>,
+    source_search: Arc<dyn SourceSearchProvider>,
 }
 
 impl AppServices {
@@ -31,6 +36,7 @@ impl AppServices {
             metadata,
             streams,
             torbox,
+            source_search: Arc::new(ProwlarrSourceProvider::from_env()),
         }
     }
 
@@ -69,5 +75,10 @@ impl AppServices {
     ) -> Option<AcquisitionResult> {
         let item = self.metadata.item(id)?;
         Some(self.torbox.submit_magnet(&item, magnet, only_if_cached))
+    }
+
+    pub fn search_sources(&self, id: &str) -> Option<SourceSearchResult> {
+        let item = self.metadata.item(id)?;
+        Some(self.source_search.search(&item))
     }
 }

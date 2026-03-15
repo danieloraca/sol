@@ -30,6 +30,7 @@ let torboxDraftMagnet = "";
 let torboxCachedOnly = true;
 let torboxAutoRefreshTimer = null;
 let torboxAutoRefreshAttempt = 0;
+let sourceSearchState = null;
 
 async function bootstrap() {
   if (!invoke) {
@@ -136,6 +137,7 @@ async function selectItem(id) {
       torboxSubmissionState = null;
       torboxDraftMagnet = "";
       torboxCachedOnly = true;
+      sourceSearchState = null;
     }
     resetPlaybackSession();
     selectedItemId = id;
@@ -153,6 +155,9 @@ async function selectItem(id) {
     } else {
       setPlaybackState(false);
       renderNoStreams(item, selectedLookup);
+      if (selectedLookup?.provider === "TorBox") {
+        void ensureSourceSearch(id);
+      }
     }
   } catch (error) {
     renderShellError(String(error));
@@ -338,6 +343,16 @@ function renderNoStreams(item, lookup) {
   const acquisitionStatus = String(torboxSubmissionState?.status ?? "").toLowerCase();
   const acquisitionPending = torboxSubmissionState?.pending ?? false;
   const showTorboxActions = provider === "TorBox";
+  const sourceSearch = sourceSearchState?.itemId === item.id
+    ? sourceSearchState
+    : {
+        itemId: item.id,
+        provider: "Prowlarr",
+        status: "idle",
+        message: "Search releases to find something you can send to TorBox.",
+        releases: [],
+        pending: false,
+      };
 
   playerStageEl.innerHTML = `
     <div class="player-screen">
@@ -378,6 +393,9 @@ function renderNoStreams(item, lookup) {
           <article class="player-details-card">
             <p class="eyebrow">Add Source</p>
             <p class="meta">Paste a magnet link and send it to TorBox. Cached-only is enabled by default so this won’t silently start a full download.</p>
+            <div class="provider-badge-row">
+              <span class="provider-badge ${sourceSearchBadgeClass(sourceSearch)}">${escapeHtml(sourceSearchBadgeLabel(sourceSearch))}</span>
+            </div>
             <label class="torbox-form">
               <span class="sr-only">Magnet link</span>
               <textarea id="torbox-magnet" placeholder="magnet:?xt=urn:btih:...">${escapeHtml(torboxDraftMagnet)}</textarea>
@@ -426,6 +444,44 @@ function renderNoStreams(item, lookup) {
         `
         : `<p class="stream-meta">No close matches were found in your current TorBox library.</p>`
     }
+    ${
+      showTorboxActions
+        ? `
+          <div class="source-search-block">
+            <p class="eyebrow">Source search</p>
+            <h3>${escapeHtml(sourceSearch.provider ?? "Prowlarr")}</h3>
+            <p class="stream-meta">${escapeHtml(sourceSearch.message ?? "Search for releases to add.")}</p>
+            <div class="control-buttons">
+              <button class="ghost-button" id="source-search-refresh" ${sourceSearch.pending ? "disabled" : ""}>
+                ${sourceSearch.pending ? "Searching..." : "Search again"}
+              </button>
+            </div>
+            ${
+              (sourceSearch.releases ?? []).length > 0
+                ? `
+                  <div class="stream-list">
+                    ${sourceSearch.releases
+                      .map(
+                        (release, index) => `
+                          <article class="stream-card">
+                            <h3>${escapeHtml(release.title)}</h3>
+                            <p class="stream-meta">${escapeHtml(release.indexer)} • ${escapeHtml(release.protocol)} • ${escapeHtml(release.quality)}</p>
+                            <p class="stream-meta">${escapeHtml(release.size)} • ${escapeHtml(release.seeders)} seeders • ${escapeHtml(release.age)}</p>
+                            <button class="stream-button" data-source-index="${index}">
+                              Send to TorBox
+                            </button>
+                          </article>
+                        `,
+                      )
+                      .join("")}
+                  </div>
+                `
+                : ""
+            }
+          </div>
+        `
+        : ""
+    }
   `;
 
   bindNoStreamActions(item, showTorboxActions);
@@ -438,6 +494,7 @@ function bindNoStreamActions(item, showTorboxActions) {
 
   const submitButton = document.querySelector("#torbox-submit-source");
   const refreshButton = document.querySelector("#torbox-refresh-lookup");
+  const searchAgainButton = document.querySelector("#source-search-refresh");
   const magnetField = document.querySelector("#torbox-magnet");
   const cachedOnlyField = document.querySelector("#torbox-only-cached");
 
@@ -498,6 +555,150 @@ function bindNoStreamActions(item, showTorboxActions) {
       renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
     }
   });
+
+  searchAgainButton?.addEventListener("click", async () => {
+    await ensureSourceSearch(item.id, { force: true });
+  });
+
+  streamsEl.querySelectorAll("[data-source-index]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const index = Number(button.dataset.sourceIndex);
+      const release = sourceSearchState?.releases?.[index];
+      if (!release?.magnet_url) {
+        return;
+      }
+
+      torboxDraftMagnet = release.magnet_url;
+      torboxSubmissionState = {
+        pending: true,
+        status: "pending",
+        message: `Sending "${release.title}" to TorBox...`,
+      };
+      renderNoStreams(item, selectedLookup);
+
+      try {
+        const result = await invoke("submit_torbox_magnet", {
+          id: item.id,
+          magnet: release.magnet_url,
+          onlyIfCached: torboxCachedOnly,
+        });
+
+        torboxSubmissionState = {
+          pending: false,
+          status: result.status,
+          message: result.message,
+        };
+
+        await selectItem(item.id);
+        if (selectedStreams.length === 0) {
+          startTorboxAutoRefresh(item.id, { autoPlay: true });
+          renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
+        }
+      } catch (error) {
+        stopTorboxAutoRefresh();
+        torboxSubmissionState = {
+          pending: false,
+          status: "error",
+          message: String(error),
+        };
+        renderNoStreams(item, selectedLookup);
+      }
+    });
+  });
+}
+
+async function ensureSourceSearch(itemId, options = {}) {
+  const { force = false } = options;
+  if (selectedItemId !== itemId) {
+    return;
+  }
+
+  if (
+    !force &&
+    sourceSearchState?.itemId === itemId &&
+    (sourceSearchState.pending || sourceSearchState.status === "ready" || sourceSearchState.status === "no_results")
+  ) {
+    return;
+  }
+
+  sourceSearchState = {
+    itemId,
+    provider: "Prowlarr",
+    status: "searching",
+    message: "Searching Prowlarr for release candidates...",
+    releases: [],
+    pending: true,
+  };
+
+  const item = itemCache.get(itemId);
+  if (item && selectedStreams.length === 0) {
+    renderNoStreams(item, selectedLookup);
+  }
+
+  try {
+    const result = await invoke("search_sources", { id: itemId });
+    if (selectedItemId !== itemId) {
+      return;
+    }
+
+    sourceSearchState = {
+      itemId,
+      ...result,
+      pending: false,
+    };
+  } catch (error) {
+    if (selectedItemId !== itemId) {
+      return;
+    }
+
+    sourceSearchState = {
+      itemId,
+      provider: "Prowlarr",
+      status: "error",
+      message: String(error),
+      releases: [],
+      pending: false,
+    };
+  }
+
+  const currentItem = itemCache.get(itemId);
+  if (currentItem && selectedItemId === itemId && selectedStreams.length === 0) {
+    renderNoStreams(currentItem, selectedLookup);
+  }
+}
+
+function sourceSearchBadgeLabel(sourceSearch) {
+  switch (sourceSearch.status) {
+    case "searching":
+      return "Prowlarr searching";
+    case "ready":
+      return `Prowlarr connected • ${sourceSearch.releases.length} results`;
+    case "no_results":
+      return "Prowlarr connected • no results";
+    case "unavailable":
+      return "Prowlarr not configured";
+    case "request_failed":
+    case "error":
+      return "Prowlarr connection issue";
+    default:
+      return "Prowlarr idle";
+  }
+}
+
+function sourceSearchBadgeClass(sourceSearch) {
+  switch (sourceSearch.status) {
+    case "ready":
+    case "no_results":
+      return "is-success";
+    case "searching":
+      return "is-pending";
+    case "unavailable":
+    case "request_failed":
+    case "error":
+      return "is-error";
+    default:
+      return "is-neutral";
+  }
 }
 
 function startTorboxAutoRefresh(itemId, options = {}) {

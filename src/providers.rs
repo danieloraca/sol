@@ -12,7 +12,8 @@ use reqwest::{
 use serde::Deserialize;
 
 use crate::domain::{
-    AcquisitionResult, HomeFeed, MediaItem, MediaType, StreamCandidate, StreamLookup, StreamSource,
+    AcquisitionResult, HomeFeed, MediaItem, MediaType, SourceRelease, SourceSearchResult,
+    StreamCandidate, StreamLookup, StreamSource,
 };
 
 const TMDB_API_BASE: &str = "https://api.themoviedb.org/3";
@@ -27,6 +28,10 @@ pub trait MetadataProvider: Send + Sync {
 
 pub trait StreamProvider: Send + Sync {
     fn lookup(&self, item: &MediaItem) -> StreamLookup;
+}
+
+pub trait SourceSearchProvider: Send + Sync {
+    fn search(&self, item: &MediaItem) -> SourceSearchResult;
 }
 
 #[derive(Clone)]
@@ -162,6 +167,17 @@ impl StreamProvider for SeededLibraryProvider {
                 streams,
                 candidates: vec![],
             }
+        }
+    }
+}
+
+impl SourceSearchProvider for SeededLibraryProvider {
+    fn search(&self, item: &MediaItem) -> SourceSearchResult {
+        SourceSearchResult {
+            provider: "Demo".into(),
+            status: "unavailable".into(),
+            message: format!("No external source search is configured for {}.", item.title),
+            releases: vec![],
         }
     }
 }
@@ -421,6 +437,13 @@ impl MetadataProvider for TmdbMetadataProvider {
 
 #[derive(Debug, Clone)]
 pub struct TorboxStreamProvider {
+    api_key: Option<String>,
+    client: Client,
+}
+
+#[derive(Clone)]
+pub struct ProwlarrSourceProvider {
+    base_url: Option<String>,
     api_key: Option<String>,
     client: Client,
 }
@@ -718,6 +741,109 @@ impl StreamProvider for TorboxStreamProvider {
     }
 }
 
+impl ProwlarrSourceProvider {
+    pub fn from_env() -> Self {
+        Self {
+            base_url: env::var("PROWLARR_URL")
+                .ok()
+                .map(|value| value.trim().trim_end_matches('/').to_string())
+                .filter(|value| !value.is_empty()),
+            api_key: env::var("PROWLARR_API_KEY")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            client: Client::builder()
+                .user_agent(format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")))
+                .build()
+                .expect("prowlarr client should build"),
+        }
+    }
+
+    fn is_configured(&self) -> bool {
+        self.base_url.is_some() && self.api_key.is_some()
+    }
+
+    fn search_query_for(&self, item: &MediaItem) -> String {
+        if item.year > 0 {
+            format!("{} {}", item.title, item.year)
+        } else {
+            item.title.clone()
+        }
+    }
+
+    fn request(&self, item: &MediaItem) -> Option<Vec<ProwlarrSearchRelease>> {
+        let base_url = self.base_url.as_ref()?;
+        let api_key = self.api_key.as_ref()?;
+        self.client
+            .get(format!("{base_url}/api/v1/search"))
+            .header("X-Api-Key", api_key)
+            .header(ACCEPT, "application/json")
+            .query(&[
+                ("query", self.search_query_for(item)),
+                ("type", "search".to_string()),
+                ("limit", "20".to_string()),
+                ("offset", "0".to_string()),
+            ])
+            .send()
+            .ok()?
+            .error_for_status()
+            .ok()?
+            .json()
+            .ok()
+    }
+}
+
+impl Default for ProwlarrSourceProvider {
+    fn default() -> Self {
+        Self::from_env()
+    }
+}
+
+impl SourceSearchProvider for ProwlarrSourceProvider {
+    fn search(&self, item: &MediaItem) -> SourceSearchResult {
+        if !self.is_configured() {
+            return SourceSearchResult {
+                provider: "Prowlarr".into(),
+                status: "unavailable".into(),
+                message: "Set PROWLARR_URL and PROWLARR_API_KEY to search releases automatically.".into(),
+                releases: vec![],
+            };
+        }
+
+        let Some(releases) = self.request(item) else {
+            return SourceSearchResult {
+                provider: "Prowlarr".into(),
+                status: "request_failed".into(),
+                message: "Prowlarr could not be reached for this search.".into(),
+                releases: vec![],
+            };
+        };
+
+        let mut mapped = releases
+            .into_iter()
+            .filter_map(|release| map_prowlarr_release(release))
+            .collect::<Vec<_>>();
+
+        if mapped.is_empty() {
+            return SourceSearchResult {
+                provider: "Prowlarr".into(),
+                status: "no_results".into(),
+                message: format!("Prowlarr did not return any addable torrent releases for {}.", item.title),
+                releases: vec![],
+            };
+        }
+
+        mapped.sort_by(|left, right| compare_source_releases(left, right));
+
+        SourceSearchResult {
+            provider: "Prowlarr".into(),
+            status: "ready".into(),
+            message: format!("Found {} release candidates for {}.", mapped.len(), item.title),
+            releases: mapped,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct FallbackStreamProvider {
     primary: Arc<dyn StreamProvider>,
@@ -807,6 +933,28 @@ struct TorboxResponse<T> {
     #[serde(default)]
     detail: Option<String>,
     data: Option<T>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProwlarrSearchRelease {
+    title: String,
+    #[serde(default)]
+    indexer: Option<String>,
+    #[serde(default)]
+    protocol: Option<String>,
+    #[serde(default)]
+    size: Option<i64>,
+    #[serde(default)]
+    seeders: Option<i64>,
+    #[serde(default)]
+    age: Option<i64>,
+    #[serde(default)]
+    magnet_url: Option<String>,
+    #[serde(default)]
+    guid: Option<String>,
+    #[serde(default)]
+    download_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -973,6 +1121,117 @@ fn top_torrent_candidates(item: &MediaItem, torrents: &[TorboxTorrent]) -> Vec<S
             ),
         })
         .collect()
+}
+
+fn map_prowlarr_release(release: ProwlarrSearchRelease) -> Option<SourceRelease> {
+    let quality = infer_quality_from_title(&release.title);
+    let magnet_url = release
+        .magnet_url
+        .or_else(|| release.guid.filter(|value| value.starts_with("magnet:?")))
+        .or_else(|| release.download_url.filter(|value| value.starts_with("magnet:?")))?;
+
+    let size = release
+        .size
+        .and_then(|value| u64::try_from(value).ok())
+        .map(format_bytes)
+        .unwrap_or_else(|| "unknown size".into());
+
+    let seeders = release
+        .seeders
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unknown seeders".into());
+
+    let age = release
+        .age
+        .map(format_age_days)
+        .unwrap_or_else(|| "unknown age".into());
+
+    Some(SourceRelease {
+        title: release.title,
+        indexer: release.indexer.unwrap_or_else(|| "Unknown indexer".into()),
+        protocol: release.protocol.unwrap_or_else(|| "torrent".into()),
+        quality,
+        size,
+        seeders,
+        age,
+        magnet_url,
+    })
+}
+
+fn compare_source_releases(left: &SourceRelease, right: &SourceRelease) -> std::cmp::Ordering {
+    parse_seeder_count(&right.seeders)
+        .cmp(&parse_seeder_count(&left.seeders))
+        .then_with(|| quality_rank(&right.quality).cmp(&quality_rank(&left.quality)))
+        .then_with(|| parse_age_days(&left.age).cmp(&parse_age_days(&right.age)))
+}
+
+fn parse_seeder_count(value: &str) -> i64 {
+    value.parse::<i64>().unwrap_or(-1)
+}
+
+fn quality_rank(value: &str) -> i32 {
+    match value {
+        "4K" => 5,
+        "2160p" => 4,
+        "1440p" => 3,
+        "1080p" => 2,
+        "720p" => 1,
+        _ => 0,
+    }
+}
+
+fn infer_quality_from_title(value: &str) -> String {
+    let normalized = value.to_ascii_lowercase();
+    if normalized.contains("2160p") || normalized.contains("4k") {
+        "4K".into()
+    } else if normalized.contains("1440p") {
+        "1440p".into()
+    } else if normalized.contains("1080p") {
+        "1080p".into()
+    } else if normalized.contains("720p") {
+        "720p".into()
+    } else {
+        "Auto".into()
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    const MIB: f64 = 1024.0 * 1024.0;
+
+    if bytes >= 1024 * 1024 * 1024 {
+        format!("{:.1} GB", bytes as f64 / GIB)
+    } else if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / MIB)
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn format_age_days(days: i64) -> String {
+    if days <= 0 {
+        "today".into()
+    } else if days == 1 {
+        "1 day".into()
+    } else {
+        format!("{days} days")
+    }
+}
+
+fn parse_age_days(value: &str) -> i64 {
+    if value == "today" {
+        0
+    } else if value == "1 day" {
+        1
+    } else {
+        value
+            .split_whitespace()
+            .next()
+            .and_then(|raw| raw.parse::<i64>().ok())
+            .unwrap_or(i64::MAX)
+    }
 }
 
 fn seed_catalog() -> Vec<MediaItem> {

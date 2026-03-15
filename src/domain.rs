@@ -39,6 +39,26 @@ pub struct AcquisitionResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SourceRelease {
+    pub title: String,
+    pub indexer: String,
+    pub protocol: String,
+    pub quality: String,
+    pub size: String,
+    pub seeders: String,
+    pub age: String,
+    pub magnet_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SourceSearchResult {
+    pub provider: String,
+    pub status: String,
+    pub message: String,
+    pub releases: Vec<SourceRelease>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MediaItem {
     pub id: String,
     pub title: String,
