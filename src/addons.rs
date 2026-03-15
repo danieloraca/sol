@@ -875,12 +875,24 @@ fn map_remote_meta_value(value: serde_json::Value) -> Option<MediaItem> {
 }
 
 fn map_remote_stream_source(stream: RemoteStream) -> Option<StreamSource> {
-    let url = stream.url.or(stream.external_url)?;
+    let url = stream.url?;
+    let playback_kind = if url.starts_with("http://") {
+        "blocked".to_string()
+    } else {
+        "embedded".to_string()
+    };
+    let playback_note = if playback_kind == "blocked" {
+        "This source uses plain HTTP and cannot be embedded here.".to_string()
+    } else {
+        "Playable in the in-app player.".to_string()
+    };
     Some(StreamSource {
         name: stream.name.or(stream.title).unwrap_or_else(|| "Remote stream".into()),
         quality: infer_quality_from_text(&url),
         language: "unknown".into(),
         url,
+        playback_kind,
+        playback_note,
     })
 }
 

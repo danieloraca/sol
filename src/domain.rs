@@ -14,6 +14,8 @@ pub struct StreamSource {
     pub quality: String,
     pub language: String,
     pub url: String,
+    pub playback_kind: String,
+    pub playback_note: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

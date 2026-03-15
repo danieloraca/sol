@@ -15,6 +15,7 @@ const addonsListEl = document.querySelector("#addons-list");
 const filterButtons = [...document.querySelectorAll(".filter")];
 const TORBOX_AUTO_REFRESH_INTERVAL_MS = 5000;
 const TORBOX_AUTO_REFRESH_MAX_ATTEMPTS = 24;
+const PLAYBACK_START_TIMEOUT_MS = 4000;
 
 let activeFilter = "";
 let itemCache = new Map();
@@ -25,10 +26,12 @@ let selectedLookup = null;
 let selectedStreamIndex = 0;
 let playbackPercent = 0;
 let isPlaying = false;
+let isPlaybackStarting = false;
 let playbackCurrentSeconds = 0;
 let playbackDurationSeconds = 0;
 let pendingSeekSeconds = null;
 let lastPlaybackError = "";
+let playbackStartTimer = null;
 let torboxSubmissionState = null;
 let torboxDraftMagnet = "";
 let torboxCachedOnly = true;
@@ -356,16 +359,20 @@ function renderStreams(title) {
             <article class="stream-card ${index === selectedStreamIndex ? "is-active" : ""}">
               <h3>${stream.name}</h3>
               <p class="stream-meta">${stream.quality} • ${stream.language}</p>
+              <div class="provider-badge-row">
+                <span class="provider-badge ${playbackKindClass(stream)}">${playbackKindLabel(stream)}</span>
+              </div>
+              <p class="stream-meta">${escapeHtml(stream.playback_note || "Source compatibility unknown.")}</p>
               <button class="stream-button ${index === selectedStreamIndex ? "is-active" : ""}" data-stream-index="${index}">
                 ${index === selectedStreamIndex ? "Selected source" : "Switch to source"}
               </button>
-              <a class="stream-link" href="${stream.url}" target="_blank" rel="noreferrer">Open source URL</a>
+              <a class="stream-link" href="${stream.url}" target="_blank" rel="noreferrer">${openSourceLabel(stream)}</a>
             </article>
           `,
         )
         .join("")}
     </div>
-    <p class="stream-meta">Active source: ${activeSource.name} at ${activeSource.quality}</p>
+    <p class="stream-meta">Active source: ${activeSource.name} at ${activeSource.quality} • ${playbackKindLabel(activeSource)}</p>
   `;
 
   streamsEl.querySelectorAll("[data-stream-index]").forEach((button) => {
@@ -821,24 +828,52 @@ function cacheItems(items) {
 }
 
 function setPlaybackState(nextState) {
-  isPlaying = nextState;
   const video = document.querySelector("#player-video");
+  const item = currentItem();
+  const stream = activeStreamForSelection();
 
-  if (video) {
-    if (isPlaying) {
-      video.play().catch((error) => {
-        isPlaying = false;
-        lastPlaybackError = `Playback could not start: ${error.message ?? error}`;
-        syncPlayerUi(currentItem(), activeStreamForSelection());
-      });
-    } else {
-      video.pause();
-    }
-  } else if (isPlaying) {
+  if (!item || !stream) {
     isPlaying = false;
+    isPlaybackStarting = false;
+    syncPlayerUi(item, stream);
+    return;
   }
 
-  syncPlayerUi(currentItem(), activeStreamForSelection());
+  if (nextState) {
+    const playbackBlockReason = getPlaybackBlockReason(stream);
+    if (playbackBlockReason) {
+      isPlaying = false;
+      isPlaybackStarting = false;
+      lastPlaybackError = playbackBlockReason;
+      syncPlayerUi(item, stream);
+      return;
+    }
+  }
+
+  if (video) {
+    if (nextState) {
+      isPlaybackStarting = true;
+      lastPlaybackError = "";
+      armPlaybackStartWatchdog(item, stream, video);
+      video.play().catch((error) => {
+        isPlaying = false;
+        isPlaybackStarting = false;
+        clearPlaybackStartWatchdog();
+        lastPlaybackError = `Playback could not start: ${error.message ?? error}`;
+        syncPlayerUi(item, stream);
+      });
+    } else {
+      isPlaying = false;
+      isPlaybackStarting = false;
+      clearPlaybackStartWatchdog();
+      video.pause();
+    }
+  } else if (nextState) {
+    isPlaying = false;
+    isPlaybackStarting = false;
+  }
+
+  syncPlayerUi(item, stream);
 }
 
 function mountPlayer(item, stream) {
@@ -865,11 +900,20 @@ function mountPlayer(item, stream) {
     syncPlaybackFromVideo(item, stream, video);
   });
 
+  video.addEventListener("canplay", () => {
+    clearPlaybackStartWatchdog();
+    if (!lastPlaybackError) {
+      syncPlayerUi(item, stream);
+    }
+  });
+
   video.addEventListener("timeupdate", () => {
     syncPlaybackFromVideo(item, stream, video);
   });
 
   video.addEventListener("play", () => {
+    clearPlaybackStartWatchdog();
+    isPlaybackStarting = false;
     isPlaying = true;
     lastPlaybackError = "";
     syncPlaybackFromVideo(item, stream, video);
@@ -877,12 +921,16 @@ function mountPlayer(item, stream) {
 
   video.addEventListener("pause", () => {
     if (!video.ended) {
+      clearPlaybackStartWatchdog();
+      isPlaybackStarting = false;
       isPlaying = false;
       syncPlaybackFromVideo(item, stream, video);
     }
   });
 
   video.addEventListener("ended", () => {
+    clearPlaybackStartWatchdog();
+    isPlaybackStarting = false;
     isPlaying = false;
     playbackCurrentSeconds = playbackDurationSeconds || video.duration || playbackCurrentSeconds;
     playbackPercent = 100;
@@ -890,8 +938,10 @@ function mountPlayer(item, stream) {
   });
 
   video.addEventListener("error", () => {
+    clearPlaybackStartWatchdog();
+    isPlaybackStarting = false;
     isPlaying = false;
-    lastPlaybackError = "The selected stream could not be loaded in the embedded player.";
+    lastPlaybackError = describeVideoError(video, stream);
     syncPlayerUi(item, stream);
   });
 
@@ -938,17 +988,25 @@ function syncPlayerUi(item, stream) {
   }
 
   if (toggleButton) {
-    toggleButton.textContent = isPlaying ? "Pause" : "Play";
+    toggleButton.textContent = isPlaybackStarting ? "Starting..." : isPlaying ? "Pause" : "Play";
   }
 
   if (streamStatusMessage) {
-    streamStatusMessage.textContent = lastPlaybackError || selectedLookup?.message || `Ready to play from ${stream.name}.`;
+    streamStatusMessage.textContent =
+      lastPlaybackError ||
+      (isPlaybackStarting ? `Trying to start playback from ${stream.name}...` : "") ||
+      selectedLookup?.message ||
+      `Ready to play from ${stream.name}.`;
   }
 }
 
 function playbackStatusLabel() {
   if (lastPlaybackError) {
     return "Playback issue";
+  }
+
+  if (isPlaybackStarting) {
+    return "Starting";
   }
 
   if (isPlaying) {
@@ -1013,7 +1071,9 @@ function resetPlaybackSession() {
     video.load();
   }
 
+  clearPlaybackStartWatchdog();
   isPlaying = false;
+  isPlaybackStarting = false;
   playbackCurrentSeconds = 0;
   playbackDurationSeconds = 0;
   playbackPercent = 0;
@@ -1025,6 +1085,77 @@ function formatPlaybackTime(item) {
   const totalSeconds = playbackDurationSeconds || estimateRuntimeSeconds(item);
   const elapsedSeconds = Math.min(playbackCurrentSeconds, totalSeconds || playbackCurrentSeconds);
   return `${playbackStatusLabel()} • ${formatDuration(elapsedSeconds)} / ${formatDuration(totalSeconds)}`;
+}
+
+function armPlaybackStartWatchdog(item, stream, video) {
+  clearPlaybackStartWatchdog();
+  playbackStartTimer = window.setTimeout(() => {
+    if (!isPlaybackStarting || isPlaying) {
+      return;
+    }
+
+    isPlaybackStarting = false;
+    isPlaying = false;
+    lastPlaybackError = getPlaybackBlockReason(stream)
+      || "This source did not become playable in the embedded player. Try Open source URL or switch to another source.";
+    syncPlayerUi(item, stream);
+
+    if (!video.paused) {
+      video.pause();
+    }
+  }, PLAYBACK_START_TIMEOUT_MS);
+}
+
+function clearPlaybackStartWatchdog() {
+  if (playbackStartTimer) {
+    window.clearTimeout(playbackStartTimer);
+    playbackStartTimer = null;
+  }
+}
+
+function getPlaybackBlockReason(stream) {
+  if (!stream?.url) {
+    return "This source does not include a media URL for embedded playback.";
+  }
+
+  if (stream.playback_kind === "external") {
+    return stream.playback_note || "This source opens outside the embedded player.";
+  }
+
+  if (stream.playback_kind === "blocked") {
+    return stream.playback_note || "This source cannot be embedded in the app.";
+  }
+
+  if (stream.url.startsWith("http://")) {
+    return "This source uses plain HTTP, and the embedded player blocks insecure media here. Use Open source URL or switch to another source.";
+  }
+
+  return "";
+}
+
+function describeVideoError(video, stream) {
+  const playbackBlockReason = getPlaybackBlockReason(stream);
+  if (playbackBlockReason) {
+    return playbackBlockReason;
+  }
+
+  const mediaError = video.error;
+  if (!mediaError) {
+    return "The selected stream could not be loaded in the embedded player.";
+  }
+
+  switch (mediaError.code) {
+    case MediaError.MEDIA_ERR_ABORTED:
+      return "Playback was interrupted before the stream could start.";
+    case MediaError.MEDIA_ERR_NETWORK:
+      return "The stream could not be loaded because of a network or server issue.";
+    case MediaError.MEDIA_ERR_DECODE:
+      return "The stream loaded, but this embedded player could not decode it.";
+    case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+      return "This source format is not supported by the embedded player.";
+    default:
+      return "The selected stream could not be loaded in the embedded player.";
+  }
 }
 
 function estimateRuntimeSeconds(item) {
@@ -1075,6 +1206,36 @@ function renderPosterImage(item, className) {
   }
 
   return `<img class="${className}" src="${item.poster_url}" alt="${escapeHtml(item.title)} poster" loading="lazy" />`;
+}
+
+function playbackKindLabel(stream) {
+  switch (stream?.playback_kind) {
+    case "embedded":
+      return "Embedded";
+    case "external":
+      return "External";
+    case "blocked":
+      return "Blocked in app";
+    default:
+      return "Unknown";
+  }
+}
+
+function playbackKindClass(stream) {
+  switch (stream?.playback_kind) {
+    case "embedded":
+      return "is-success";
+    case "external":
+      return "is-pending";
+    case "blocked":
+      return "is-error";
+    default:
+      return "is-neutral";
+  }
+}
+
+function openSourceLabel(stream) {
+  return stream?.playback_kind === "embedded" ? "Open source URL" : "Open externally";
 }
 
 function escapeHtml(value) {

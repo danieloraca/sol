@@ -739,6 +739,8 @@ impl StreamProvider for TorboxStreamProvider {
                 quality,
                 language,
                 url: stream.hls_url,
+                playback_kind: "embedded".into(),
+                playback_note: "Playable in the in-app player.".into(),
             }],
             candidates,
         }
@@ -1254,12 +1256,16 @@ fn seed_catalog() -> Vec<MediaItem> {
                     quality: "4K".into(),
                     language: "en".into(),
                     url: "https://stream.example.com/solstice-run/4k".into(),
+                    playback_kind: "embedded".into(),
+                    playback_note: "Playable in the in-app player.".into(),
                 },
                 StreamSource {
                     name: "Fallback Edge".into(),
                     quality: "1080p".into(),
                     language: "en".into(),
                     url: "https://stream.example.com/solstice-run/1080p".into(),
+                    playback_kind: "embedded".into(),
+                    playback_note: "Playable in the in-app player.".into(),
                 },
             ],
         },
@@ -1276,6 +1282,8 @@ fn seed_catalog() -> Vec<MediaItem> {
                 quality: "1080p".into(),
                 language: "en".into(),
                 url: "https://stream.example.com/night-shift-atlas/s1".into(),
+                playback_kind: "embedded".into(),
+                playback_note: "Playable in the in-app player.".into(),
             }],
         },
         MediaItem {
@@ -1291,6 +1299,8 @@ fn seed_catalog() -> Vec<MediaItem> {
                 quality: "720p".into(),
                 language: "instrumental".into(),
                 url: "https://stream.example.com/lofi-cosmos/live".into(),
+                playback_kind: "embedded".into(),
+                playback_note: "Playable in the in-app player.".into(),
             }],
         },
         MediaItem {
@@ -1306,6 +1316,8 @@ fn seed_catalog() -> Vec<MediaItem> {
                 quality: "1080p".into(),
                 language: "en".into(),
                 url: "https://stream.example.com/quiet-voltage/main".into(),
+                playback_kind: "embedded".into(),
+                playback_note: "Playable in the in-app player.".into(),
             }],
         },
     ]
