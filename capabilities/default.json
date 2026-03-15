@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Default permissions for the Sol desktop shell.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

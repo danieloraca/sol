@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sol</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <p class="eyebrow">Desktop preview</p>
+          <h1>Sol</h1>
+          <p class="tagline">A Rust media app starter with a living catalog and playback sources.</p>
+        </div>
+
+        <nav class="filters">
+          <button class="filter is-active" data-filter="">All</button>
+          <button class="filter" data-filter="movie">Movies</button>
+          <button class="filter" data-filter="series">Series</button>
+          <button class="filter" data-filter="channel">Channels</button>
+        </nav>
+
+        <label class="search">
+          <span>Search catalog</span>
+          <input id="search" type="search" placeholder="Try atlas, ambient, sci-fi..." />
+        </label>
+
+      </aside>
+
+      <main class="content">
+        <section class="hero" id="hero"></section>
+
+        <section class="player-shell">
+          <div class="player-stage" id="player-stage"></div>
+
+          <aside class="player-sidebar">
+            <div class="section-heading">
+              <p class="eyebrow">Playback</p>
+              <h2>Player controls</h2>
+            </div>
+
+            <div id="player-details" class="player-details"></div>
+            <div id="streams" class="streams empty">Select a title to inspect its stream sources.</div>
+          </aside>
+        </section>
+
+        <section>
+          <div class="section-heading">
+            <p class="eyebrow">Home feed</p>
+            <h2>Trending now</h2>
+          </div>
+          <div id="trending" class="rail"></div>
+        </section>
+
+        <section>
+          <div class="section-heading">
+            <p class="eyebrow">Resume</p>
+            <h2>Continue watching</h2>
+          </div>
+          <div id="continue-watching" class="rail"></div>
+        </section>
+
+        <section>
+          <div class="section-heading">
+            <p class="eyebrow">Catalog</p>
+            <h2>Browse library</h2>
+          </div>
+          <div id="catalog" class="catalog-grid"></div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
