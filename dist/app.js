@@ -9,6 +9,8 @@ const catalogEl = document.querySelector("#catalog");
 const streamsEl = document.querySelector("#streams");
 const searchEl = document.querySelector("#search");
 const filterButtons = [...document.querySelectorAll(".filter")];
+const TORBOX_AUTO_REFRESH_INTERVAL_MS = 5000;
+const TORBOX_AUTO_REFRESH_MAX_ATTEMPTS = 24;
 
 let activeFilter = "";
 let itemCache = new Map();
@@ -26,6 +28,8 @@ let lastPlaybackError = "";
 let torboxSubmissionState = null;
 let torboxDraftMagnet = "";
 let torboxCachedOnly = true;
+let torboxAutoRefreshTimer = null;
+let torboxAutoRefreshAttempt = 0;
 
 async function bootstrap() {
   if (!invoke) {
@@ -128,6 +132,7 @@ async function selectItem(id) {
   try {
     const item = await getItem(id);
     if (id !== selectedItemId) {
+      stopTorboxAutoRefresh();
       torboxSubmissionState = null;
       torboxDraftMagnet = "";
       torboxCachedOnly = true;
@@ -142,6 +147,7 @@ async function selectItem(id) {
     playbackDurationSeconds = estimateRuntimeSeconds(item);
     lastPlaybackError = "";
     if (selectedStreams.length > 0) {
+      stopTorboxAutoRefresh();
       renderPlayer(item);
       renderStreams(item.title);
     } else {
@@ -463,9 +469,11 @@ function bindNoStreamActions(item, showTorboxActions) {
 
       await selectItem(item.id);
       if (selectedStreams.length === 0) {
+        startTorboxAutoRefresh(item.id, { autoPlay: true });
         renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
       }
     } catch (error) {
+      stopTorboxAutoRefresh();
       torboxSubmissionState = {
         pending: false,
         status: "error",
@@ -483,12 +491,77 @@ function bindNoStreamActions(item, showTorboxActions) {
       status: "refresh",
       message: "Refreshing TorBox lookup...",
     };
-    renderNoStreams(item, selectedLookup);
+    stopTorboxAutoRefresh();
     await selectItem(item.id);
     if (selectedStreams.length === 0) {
+      startTorboxAutoRefresh(item.id);
       renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
     }
   });
+}
+
+function startTorboxAutoRefresh(itemId, options = {}) {
+  const { autoPlay = false } = options;
+  stopTorboxAutoRefresh();
+  torboxAutoRefreshAttempt = 0;
+
+  const poll = async () => {
+    if (selectedItemId !== itemId) {
+      stopTorboxAutoRefresh();
+      return;
+    }
+
+    torboxAutoRefreshAttempt += 1;
+    torboxSubmissionState = {
+      pending: false,
+      status: "refresh",
+      message: `Waiting for TorBox to prepare this item. Auto-refreshing (${torboxAutoRefreshAttempt}/${TORBOX_AUTO_REFRESH_MAX_ATTEMPTS})...`,
+    };
+
+    await selectItem(itemId);
+
+    if (selectedStreams.length > 0) {
+      torboxSubmissionState = {
+        pending: false,
+        status: "ready",
+        message: "TorBox has a playable stream ready.",
+      };
+      if (autoPlay) {
+        setPlaybackState(true);
+      }
+      return;
+    }
+
+    if (torboxAutoRefreshAttempt >= TORBOX_AUTO_REFRESH_MAX_ATTEMPTS) {
+      stopTorboxAutoRefresh();
+      torboxSubmissionState = {
+        pending: false,
+        status: "timeout",
+        message: "Still waiting on TorBox. Try Refresh lookup again in a little while.",
+      };
+      const item = itemCache.get(itemId);
+      if (item) {
+        renderNoStreams(item, selectedLookup);
+      }
+      return;
+    }
+
+    torboxAutoRefreshTimer = window.setTimeout(() => {
+      void poll();
+    }, TORBOX_AUTO_REFRESH_INTERVAL_MS);
+  };
+
+  torboxAutoRefreshTimer = window.setTimeout(() => {
+    void poll();
+  }, TORBOX_AUTO_REFRESH_INTERVAL_MS);
+}
+
+function stopTorboxAutoRefresh() {
+  if (torboxAutoRefreshTimer) {
+    window.clearTimeout(torboxAutoRefreshTimer);
+    torboxAutoRefreshTimer = null;
+  }
+  torboxAutoRefreshAttempt = 0;
 }
 
 function cacheItems(items) {
@@ -762,6 +835,7 @@ function escapeHtml(value) {
 }
 
 function renderShellError(message) {
+  stopTorboxAutoRefresh();
   streamsEl.classList.add("empty");
   streamsEl.textContent = message;
   playerDetailsEl.innerHTML = "";

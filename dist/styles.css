@@ -536,7 +536,8 @@ body {
 
 .submit-feedback.submitted,
 .submit-feedback.submitted_cached_only,
-.submit-feedback.refresh {
+.submit-feedback.refresh,
+.submit-feedback.ready {
   color: var(--accent);
 }
 
@@ -544,7 +545,8 @@ body {
 .submit-feedback.request_failed,
 .submit-feedback.bad_response,
 .submit-feedback.missing_magnet,
-.submit-feedback.unavailable {
+.submit-feedback.unavailable,
+.submit-feedback.timeout {
   color: var(--danger);
 }
 
