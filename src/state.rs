@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    domain::{HomeFeed, MediaItem, MediaType, StreamLookup, StreamSource},
+    domain::{AcquisitionResult, HomeFeed, MediaItem, MediaType, StreamLookup, StreamSource},
     services::AppServices,
 };
 
@@ -39,5 +39,14 @@ impl AppState {
 
     pub fn item(&self, id: &str) -> Option<MediaItem> {
         self.services.item(id)
+    }
+
+    pub fn submit_torbox_magnet(
+        &self,
+        id: &str,
+        magnet: &str,
+        only_if_cached: bool,
+    ) -> Option<AcquisitionResult> {
+        self.services.submit_torbox_magnet(id, magnet, only_if_cached)
     }
 }

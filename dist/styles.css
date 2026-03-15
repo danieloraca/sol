@@ -72,8 +72,21 @@ body {
 .stream-meta,
 .progress-meta,
 .player-subtitle,
-.streams.empty {
+.streams.empty,
+.submit-feedback {
   color: var(--muted);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .filters {
@@ -118,6 +131,24 @@ body {
 }
 
 .search input:focus {
+  border-color: rgba(125, 249, 208, 0.5);
+}
+
+.torbox-form textarea {
+  width: 100%;
+  min-height: 94px;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 14px;
+  resize: vertical;
+  background: rgba(8, 22, 37, 0.84);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.torbox-form textarea:focus {
   border-color: rgba(125, 249, 208, 0.5);
 }
 
@@ -372,10 +403,21 @@ body {
 
 .player-badges,
 .hero-actions,
-.control-buttons {
+.control-buttons,
+.checkbox-row {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.checkbox-row {
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.checkbox-row input {
+  accent-color: var(--accent);
 }
 
 .badge,
@@ -451,6 +493,14 @@ body {
   color: #06231d;
 }
 
+.primary-button:disabled,
+.ghost-button:disabled,
+.control-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+  transform: none;
+}
+
 .player-progress {
   display: grid;
   gap: 10px;
@@ -478,6 +528,24 @@ body {
 
 .player-details-card {
   padding: 18px;
+}
+
+.submit-feedback {
+  margin: 12px 0 0;
+}
+
+.submit-feedback.submitted,
+.submit-feedback.submitted_cached_only,
+.submit-feedback.refresh {
+  color: var(--accent);
+}
+
+.submit-feedback.error,
+.submit-feedback.request_failed,
+.submit-feedback.bad_response,
+.submit-feedback.missing_magnet,
+.submit-feedback.unavailable {
+  color: var(--danger);
 }
 
 .control-row {

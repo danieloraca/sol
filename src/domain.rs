@@ -32,6 +32,13 @@ pub struct StreamLookup {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AcquisitionResult {
+    pub provider: String,
+    pub status: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MediaItem {
     pub id: String,
     pub title: String,

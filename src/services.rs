@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    domain::{HomeFeed, MediaItem, MediaType, StreamLookup, StreamSource},
+    domain::{AcquisitionResult, HomeFeed, MediaItem, MediaType, StreamLookup, StreamSource},
     providers::{
         FallbackMetadataProvider, FallbackStreamProvider, MetadataProvider, SeededLibraryProvider,
         StreamProvider, TmdbMetadataProvider, TorboxStreamProvider,
@@ -12,6 +12,7 @@ use crate::{
 pub struct AppServices {
     metadata: Arc<dyn MetadataProvider>,
     streams: Arc<dyn StreamProvider>,
+    torbox: Arc<TorboxStreamProvider>,
 }
 
 impl AppServices {
@@ -24,11 +25,12 @@ impl AppServices {
             })
             .unwrap_or_else(|| seeded.clone());
         let torbox = Arc::new(TorboxStreamProvider::from_env());
-        let streams = Arc::new(FallbackStreamProvider::new(torbox, seeded.clone()));
+        let streams = Arc::new(FallbackStreamProvider::new(torbox.clone(), seeded.clone()));
 
         Self {
             metadata,
             streams,
+            torbox,
         }
     }
 
@@ -57,5 +59,15 @@ impl AppServices {
     pub fn stream_lookup(&self, id: &str) -> Option<StreamLookup> {
         let item = self.metadata.item(id)?;
         Some(self.streams.lookup(&item))
+    }
+
+    pub fn submit_torbox_magnet(
+        &self,
+        id: &str,
+        magnet: &str,
+        only_if_cached: bool,
+    ) -> Option<AcquisitionResult> {
+        let item = self.metadata.item(id)?;
+        Some(self.torbox.submit_magnet(&item, magnet, only_if_cached))
     }
 }

@@ -23,6 +23,9 @@ let playbackCurrentSeconds = 0;
 let playbackDurationSeconds = 0;
 let pendingSeekSeconds = null;
 let lastPlaybackError = "";
+let torboxSubmissionState = null;
+let torboxDraftMagnet = "";
+let torboxCachedOnly = true;
 
 async function bootstrap() {
   if (!invoke) {
@@ -124,6 +127,11 @@ function bindHeroButtons() {
 async function selectItem(id) {
   try {
     const item = await getItem(id);
+    if (id !== selectedItemId) {
+      torboxSubmissionState = null;
+      torboxDraftMagnet = "";
+      torboxCachedOnly = true;
+    }
     resetPlaybackSession();
     selectedItemId = id;
     selectedLookup = await invoke("get_stream_lookup", { id });
@@ -320,6 +328,10 @@ function renderNoStreams(item, lookup) {
   const provider = lookup?.provider ?? "Streams";
   const message = lookup?.message ?? `No streams found for ${item.id}`;
   const candidates = lookup?.candidates ?? [];
+  const acquisitionMessage = torboxSubmissionState?.message ?? "";
+  const acquisitionStatus = String(torboxSubmissionState?.status ?? "").toLowerCase();
+  const acquisitionPending = torboxSubmissionState?.pending ?? false;
+  const showTorboxActions = provider === "TorBox";
 
   playerStageEl.innerHTML = `
     <div class="player-screen">
@@ -353,6 +365,36 @@ function renderNoStreams(item, lookup) {
       <p class="eyebrow">Stream status</p>
       <p>${message}</p>
     </article>
+
+    ${
+      showTorboxActions
+        ? `
+          <article class="player-details-card">
+            <p class="eyebrow">Add Source</p>
+            <p class="meta">Paste a magnet link and send it to TorBox. Cached-only is enabled by default so this won’t silently start a full download.</p>
+            <label class="torbox-form">
+              <span class="sr-only">Magnet link</span>
+              <textarea id="torbox-magnet" placeholder="magnet:?xt=urn:btih:...">${escapeHtml(torboxDraftMagnet)}</textarea>
+            </label>
+            <label class="checkbox-row">
+              <input id="torbox-only-cached" type="checkbox" ${torboxCachedOnly ? "checked" : ""} />
+              <span>Only add if already cached</span>
+            </label>
+            <div class="control-buttons">
+              <button class="primary-button" id="torbox-submit-source" ${acquisitionPending ? "disabled" : ""}>
+                ${acquisitionPending ? "Sending..." : "Send to TorBox"}
+              </button>
+              <button class="ghost-button" id="torbox-refresh-lookup">Refresh lookup</button>
+            </div>
+            ${
+              acquisitionMessage
+                ? `<p class="submit-feedback ${escapeHtml(acquisitionStatus)}">${escapeHtml(acquisitionMessage)}</p>`
+                : ""
+            }
+          </article>
+        `
+        : ""
+    }
   `;
 
   streamsEl.classList.remove("empty");
@@ -379,6 +421,74 @@ function renderNoStreams(item, lookup) {
         : `<p class="stream-meta">No close matches were found in your current TorBox library.</p>`
     }
   `;
+
+  bindNoStreamActions(item, showTorboxActions);
+}
+
+function bindNoStreamActions(item, showTorboxActions) {
+  if (!showTorboxActions) {
+    return;
+  }
+
+  const submitButton = document.querySelector("#torbox-submit-source");
+  const refreshButton = document.querySelector("#torbox-refresh-lookup");
+  const magnetField = document.querySelector("#torbox-magnet");
+  const cachedOnlyField = document.querySelector("#torbox-only-cached");
+
+  submitButton?.addEventListener("click", async () => {
+    const magnet = magnetField?.value?.trim() ?? "";
+    const onlyIfCached = cachedOnlyField?.checked ?? true;
+    torboxDraftMagnet = magnet;
+    torboxCachedOnly = onlyIfCached;
+
+    torboxSubmissionState = {
+      pending: true,
+      status: "pending",
+      message: "Sending magnet to TorBox...",
+    };
+    renderNoStreams(item, selectedLookup);
+
+    try {
+      const result = await invoke("submit_torbox_magnet", {
+        id: item.id,
+        magnet,
+        onlyIfCached,
+      });
+
+      torboxSubmissionState = {
+        pending: false,
+        status: result.status,
+        message: result.message,
+      };
+
+      await selectItem(item.id);
+      if (selectedStreams.length === 0) {
+        renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
+      }
+    } catch (error) {
+      torboxSubmissionState = {
+        pending: false,
+        status: "error",
+        message: String(error),
+      };
+      renderNoStreams(item, selectedLookup);
+    }
+  });
+
+  refreshButton?.addEventListener("click", async () => {
+    torboxDraftMagnet = magnetField?.value ?? torboxDraftMagnet;
+    torboxCachedOnly = cachedOnlyField?.checked ?? torboxCachedOnly;
+    torboxSubmissionState = {
+      pending: false,
+      status: "refresh",
+      message: "Refreshing TorBox lookup...",
+    };
+    renderNoStreams(item, selectedLookup);
+    await selectItem(item.id);
+    if (selectedStreams.length === 0) {
+      renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
+    }
+  });
 }
 
 function cacheItems(items) {

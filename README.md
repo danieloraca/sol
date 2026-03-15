@@ -82,6 +82,13 @@ For TMDB-backed movie items, the app now:
 
 If TorBox has no matching item yet, the app now shows a clearer “no stream yet” state with the closest matches it found in your current TorBox library.
 
+When a title still has no stream, the desktop app now also lets you:
+
+1. Paste a magnet link into the no-stream panel.
+2. Send it directly to TorBox.
+3. Keep the action in cached-only mode by default, or turn that off if you explicitly want TorBox to queue the torrent.
+4. Refresh the lookup and try playback again once TorBox has the item ready.
+
 ## Suggested next steps
 
 1. Add real metadata providers and a local library/watch history store with SQLite.

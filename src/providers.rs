@@ -6,11 +6,14 @@ use std::{
 
 use reqwest::{
     blocking::Client,
+    blocking::multipart::Form,
     header::{ACCEPT, AUTHORIZATION, HeaderValue},
 };
 use serde::Deserialize;
 
-use crate::domain::{HomeFeed, MediaItem, MediaType, StreamCandidate, StreamLookup, StreamSource};
+use crate::domain::{
+    AcquisitionResult, HomeFeed, MediaItem, MediaType, StreamCandidate, StreamLookup, StreamSource,
+};
 
 const TMDB_API_BASE: &str = "https://api.themoviedb.org/3";
 const TMDB_IMAGE_BASE_FALLBACK: &str = "https://image.tmdb.org/t/p/w500";
@@ -506,6 +509,110 @@ impl TorboxStreamProvider {
         )
         .and_then(|response| response.data)
     }
+
+    pub fn submit_magnet(
+        &self,
+        item: &MediaItem,
+        magnet: &str,
+        only_if_cached: bool,
+    ) -> AcquisitionResult {
+        if self.api_key.is_none() {
+            return AcquisitionResult {
+                provider: "TorBox".into(),
+                status: "unavailable".into(),
+                message: "Set TORBOX_API_KEY before sending magnets to TorBox.".into(),
+            };
+        }
+
+        let magnet = magnet.trim();
+        if magnet.is_empty() {
+            return AcquisitionResult {
+                provider: "TorBox".into(),
+                status: "missing_magnet".into(),
+                message: "Paste a magnet link before sending it to TorBox.".into(),
+            };
+        }
+
+        let Some(auth_header) = self.auth_header() else {
+            return AcquisitionResult {
+                provider: "TorBox".into(),
+                status: "unavailable".into(),
+                message: "TorBox authentication is not available.".into(),
+            };
+        };
+
+        let form = Form::new()
+            .text("magnet", magnet.to_string())
+            .text("name", format!("{} ({})", item.title, item.year))
+            .text("allow_zip", "false")
+            .text(
+                "add_only_if_cached",
+                if only_if_cached { "true" } else { "false" },
+            )
+            .text("as_queued", if only_if_cached { "false" } else { "true" });
+
+        let response = match self
+            .client
+            .post("https://api.torbox.app/v1/api/torrents/createtorrent")
+            .header(ACCEPT, "application/json")
+            .header(AUTHORIZATION, auth_header)
+            .multipart(form)
+            .send()
+        {
+            Ok(response) => response,
+            Err(_) => {
+                return AcquisitionResult {
+                    provider: "TorBox".into(),
+                    status: "request_failed".into(),
+                    message: "TorBox could not be reached while sending this magnet.".into(),
+                }
+            }
+        };
+
+        let status = response.status();
+        let parsed = match response.json::<TorboxResponse<TorboxCreateTorrentData>>() {
+            Ok(parsed) => parsed,
+            Err(_) => {
+                return AcquisitionResult {
+                    provider: "TorBox".into(),
+                    status: "bad_response".into(),
+                    message: "TorBox accepted the magnet request but returned an unreadable response.".into(),
+                }
+            }
+        };
+
+        if parsed.success {
+            let detail = parsed
+                .detail
+                .unwrap_or_else(|| "Torrent added successfully.".into());
+            let suffix = parsed
+                .data
+                .map(|data| format!(" TorBox item {} was created.", data.torrent_id))
+                .unwrap_or_default();
+
+            return AcquisitionResult {
+                provider: "TorBox".into(),
+                status: if only_if_cached {
+                    "submitted_cached_only".into()
+                } else {
+                    "submitted".into()
+                },
+                message: format!("{detail}{suffix}"),
+            };
+        }
+
+        let fallback_message = if status.is_client_error() || status.is_server_error() {
+            format!("TorBox rejected the magnet request with HTTP {}.", status)
+        } else {
+            "TorBox could not accept that magnet.".into()
+        };
+
+        AcquisitionResult {
+            provider: "TorBox".into(),
+            status: parsed.error.unwrap_or_else(|| "request_failed".into()),
+            message: parsed.detail.unwrap_or(fallback_message),
+        }
+    }
 }
 
 impl Default for TorboxStreamProvider {
@@ -695,6 +802,10 @@ struct TmdbConfigurationImages {
 #[derive(Deserialize)]
 struct TorboxResponse<T> {
     success: bool,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    detail: Option<String>,
     data: Option<T>,
 }
 
@@ -729,6 +840,11 @@ impl TorboxTorrentFile {
 struct TorboxCreateStreamData {
     hls_url: String,
     metadata: TorboxStreamMetadata,
+}
+
+#[derive(Deserialize)]
+struct TorboxCreateTorrentData {
+    torrent_id: i64,
 }
 
 #[derive(Deserialize)]
@@ -936,6 +1052,8 @@ fn seed_catalog() -> Vec<MediaItem> {
 mod tests {
     use std::sync::Arc;
 
+    use reqwest::blocking::Client;
+
     use super::{
         FallbackMetadataProvider, FallbackStreamProvider, MetadataProvider, SeededLibraryProvider,
         StreamProvider, TmdbMetadataProvider, TorboxStreamProvider, TorboxTorrent,
@@ -1020,5 +1138,29 @@ mod tests {
         assert!(has_video_extension("movie.mkv"));
         assert!(has_video_extension("movie.mp4"));
         assert!(!has_video_extension("subtitle.srt"));
+    }
+
+    #[test]
+    fn submit_magnet_requires_api_key() {
+        let provider = TorboxStreamProvider {
+            api_key: None,
+            client: Client::builder()
+                .build()
+                .expect("test reqwest client should build"),
+        };
+        let item = MediaItem {
+            id: "tmdb:movie:1".into(),
+            title: "War Machine".into(),
+            description: String::new(),
+            media_type: MediaType::Movie,
+            genres: vec![],
+            poster_url: String::new(),
+            year: 2026,
+            streams: vec![],
+        };
+
+        let result = provider.submit_magnet(&item, "magnet:?xt=urn:btih:demo", true);
+
+        assert_eq!(result.status, "unavailable");
     }
 }
