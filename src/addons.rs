@@ -676,7 +676,7 @@ impl SolAddon for ProwlarrSearchAddon {
     }
 
     fn source_search(&self, item: &MediaItem) -> Option<SourceSearchResult> {
-        Some(self.provider.search(item))
+        self.provider.is_configured().then(|| self.provider.search(item))
     }
 }
 
@@ -1389,8 +1389,9 @@ mod tests {
     use reqwest::blocking::Client;
 
     use super::{
-        AddonRegistry, RemoteHttpAddon, RemoteManifest, RemoteResourceEntry, RemoteResourceObject,
-        RemoteStream, dedupe_stream_sources, map_remote_stream_source_release,
+        AddonRegistry, ProwlarrSearchAddon, RemoteHttpAddon, RemoteManifest, RemoteResourceEntry,
+        RemoteResourceObject, RemoteStream, SolAddon, dedupe_stream_sources,
+        map_remote_stream_source_release,
         media_id_candidates, select_supported_resource_id,
     };
     use crate::domain::{MediaItem, MediaType, StreamSource};
@@ -1502,5 +1503,28 @@ mod tests {
         .expect("info hash should produce a source release");
 
         assert_eq!(release.magnet_url, "magnet:?xt=urn:btih:ABC123");
+    }
+
+    #[test]
+    fn unconfigured_prowlarr_does_not_participate_in_source_search() {
+        let addon = ProwlarrSearchAddon::new();
+        if addon.provider.is_configured() {
+            return;
+        }
+
+        let item = MediaItem {
+            id: "tmdb:movie:123".into(),
+            alternate_ids: vec![],
+            title: "Test".into(),
+            description: String::new(),
+            media_type: MediaType::Movie,
+            genres: vec![],
+            poster_url: String::new(),
+            backdrop_url: String::new(),
+            year: 2026,
+            streams: vec![],
+        };
+
+        assert!(addon.source_search(&item).is_none());
     }
 }

@@ -662,6 +662,43 @@ body {
   margin: 12px 0 0;
 }
 
+.trace-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.trace-step {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.trace-step p {
+  margin: 0;
+}
+
+.trace-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.trace-step.success .trace-dot {
+  background: var(--accent);
+}
+
+.trace-step.pending .trace-dot {
+  background: var(--accent-strong);
+}
+
+.trace-step.error .trace-dot {
+  background: var(--danger);
+}
+
 .submit-feedback.submitted,
 .submit-feedback.submitted_cached_only,
 .submit-feedback.refresh,

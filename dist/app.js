@@ -44,6 +44,7 @@ let installedAddons = [];
 let selectedAddonSource = null;
 let autoPlayPending = false;
 let manualSourceToolsVisible = false;
+let autoPlayTrace = null;
 
 async function bootstrap() {
   if (!invoke) {
@@ -360,6 +361,7 @@ async function selectItem(id, options = {}) {
       torboxCachedOnly = true;
       sourceSearchState = null;
       manualSourceToolsVisible = false;
+      autoPlayTrace = null;
     }
     resetPlaybackSession();
     selectedItemId = id;
@@ -655,6 +657,7 @@ function renderNoStreams(item, lookup) {
         releases: [],
         pending: false,
       };
+  const traceSteps = autoPlayTrace?.itemId === item.id ? autoPlayTrace.steps : [];
 
   playerStageEl.innerHTML = `
     <div class="player-screen">
@@ -700,7 +703,7 @@ function renderNoStreams(item, lookup) {
             </div>
             <div class="control-buttons">
               <button class="primary-button" id="autoplay-source" ${acquisitionPending || autoPlayPending ? "disabled" : ""}>
-                ${acquisitionPending || autoPlayPending ? "Trying..." : "Try autoplay"}
+                Play
               </button>
               <button class="ghost-button" id="toggle-manual-source-tools">
                 ${showTorboxActions ? "Hide manual tools" : "Show manual tools"}
@@ -710,6 +713,28 @@ function renderNoStreams(item, lookup) {
               acquisitionMessage
                 ? `<p class="submit-feedback ${escapeHtml(acquisitionStatus)}">${escapeHtml(acquisitionMessage)}</p>`
                 : ""
+            }
+          </article>
+
+          <article class="player-details-card">
+            <p class="eyebrow">Autoplay trace</p>
+            ${
+              traceSteps.length > 0
+                ? `
+                  <div class="trace-list">
+                    ${traceSteps
+                      .map(
+                        (step) => `
+                          <div class="trace-step ${escapeHtml(step.kind)}">
+                            <span class="trace-dot"></span>
+                            <p>${escapeHtml(step.message)}</p>
+                          </div>
+                        `
+                      )
+                      .join("")}
+                  </div>
+                `
+                : `<p class="meta">Press Play and Sol will log each autoplay step here.</p>`
             }
           </article>
         `
@@ -1034,6 +1059,28 @@ function sourceSearchBadgeClass(sourceSearch) {
   }
 }
 
+function resetAutoPlayTrace(itemId) {
+  autoPlayTrace = {
+    itemId,
+    steps: [],
+  };
+}
+
+function pushAutoPlayTrace(itemId, message, kind = "neutral") {
+  if (selectedItemId !== itemId) {
+    return;
+  }
+
+  if (!autoPlayTrace || autoPlayTrace.itemId !== itemId) {
+    resetAutoPlayTrace(itemId);
+  }
+
+  autoPlayTrace.steps.push({ message, kind });
+  if (autoPlayTrace.steps.length > 8) {
+    autoPlayTrace.steps = autoPlayTrace.steps.slice(-8);
+  }
+}
+
 function startTorboxAutoRefresh(itemId, options = {}) {
   const { autoPlay = false } = options;
   stopTorboxAutoRefresh();
@@ -1051,6 +1098,7 @@ function startTorboxAutoRefresh(itemId, options = {}) {
       status: "refresh",
       message: `Waiting for TorBox to prepare this item. Auto-refreshing (${torboxAutoRefreshAttempt}/${TORBOX_AUTO_REFRESH_MAX_ATTEMPTS})...`,
     };
+    pushAutoPlayTrace(itemId, `Waiting for TorBox (${torboxAutoRefreshAttempt}/${TORBOX_AUTO_REFRESH_MAX_ATTEMPTS}).`, "pending");
 
     await selectItem(itemId);
 
@@ -1060,6 +1108,7 @@ function startTorboxAutoRefresh(itemId, options = {}) {
         status: "ready",
         message: "TorBox has a playable stream ready.",
       };
+      pushAutoPlayTrace(itemId, "TorBox returned a playable stream.", "success");
       if (autoPlay) {
         setPlaybackState(true);
       }
@@ -1073,6 +1122,7 @@ function startTorboxAutoRefresh(itemId, options = {}) {
         status: "timeout",
         message: "Still waiting on TorBox. Try Refresh lookup again in a little while.",
       };
+      pushAutoPlayTrace(itemId, "Timed out waiting for TorBox to prepare a stream.", "error");
       const item = itemCache.get(itemId);
       if (item) {
         renderNoStreams(item, selectedLookup);
@@ -1114,11 +1164,15 @@ async function attemptAutoPlay(item, options = {}) {
   }
 
   if (!force && selectedStreams.length > 0) {
+    resetAutoPlayTrace(item.id);
+    pushAutoPlayTrace(item.id, "Using an existing playable stream.", "success");
     setPlaybackState(true);
     return;
   }
 
   if (!showAutomaticSourceActions()) {
+    resetAutoPlayTrace(item.id);
+    pushAutoPlayTrace(item.id, "Autoplay cannot continue because TorBox is not configured.", "error");
     torboxSubmissionState = {
       pending: false,
       status: "auto_unavailable",
@@ -1129,6 +1183,8 @@ async function attemptAutoPlay(item, options = {}) {
   }
 
   autoPlayPending = true;
+  resetAutoPlayTrace(item.id);
+  pushAutoPlayTrace(item.id, "Play pressed. Checking addon-provided streams and source candidates.", "pending");
   torboxSubmissionState = {
     pending: true,
     status: "searching",
@@ -1141,8 +1197,16 @@ async function attemptAutoPlay(item, options = {}) {
     let release = lookupCandidates[0] ?? null;
 
     if (!release) {
+      pushAutoPlayTrace(item.id, "No addable candidates in the current stream lookup. Searching source providers.", "pending");
       await ensureSourceSearch(item.id, { force: true });
       release = sourceSearchState?.itemId === item.id ? sourceSearchState.releases?.[0] : null;
+      if (release) {
+        pushAutoPlayTrace(item.id, `Found ${sourceSearchState.releases.length} automatic source candidate(s).`, "success");
+      } else {
+        pushAutoPlayTrace(item.id, sourceSearchState?.message || "No automatic source candidates found.", "error");
+      }
+    } else {
+      pushAutoPlayTrace(item.id, `Found an addon-provided source candidate: ${release.name || release.title}.`, "success");
     }
 
     if (!release?.magnet_url) {
@@ -1157,6 +1221,7 @@ async function attemptAutoPlay(item, options = {}) {
     }
 
     torboxDraftMagnet = release.magnet_url;
+    pushAutoPlayTrace(item.id, `Submitting ${release.title || release.name} to TorBox.`, "pending");
     torboxSubmissionState = {
       pending: true,
       status: "pending",
@@ -1175,17 +1240,27 @@ async function attemptAutoPlay(item, options = {}) {
       status: result.status,
       message: result.message,
     };
+    pushAutoPlayTrace(
+      item.id,
+      result.message,
+      result.status === "ready" || result.status === "submitted" || result.status === "submitted_cached_only"
+        ? "success"
+        : "pending"
+    );
 
     await selectItem(item.id);
     if (selectedStreams.length > 0) {
+      pushAutoPlayTrace(item.id, "A playable stream is ready and playback is starting.", "success");
       setPlaybackState(true);
       return;
     }
 
+    pushAutoPlayTrace(item.id, "Waiting for TorBox to prepare a playable stream.", "pending");
     startTorboxAutoRefresh(item.id, { autoPlay: true });
     renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
   } catch (error) {
     stopTorboxAutoRefresh();
+    pushAutoPlayTrace(item.id, `Autoplay failed: ${String(error)}`, "error");
     torboxSubmissionState = {
       pending: false,
       status: "error",
