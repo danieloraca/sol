@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
+    addons::MoveDirection,
     domain::{
         AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, MediaType, SourceSearchResult,
         StreamLookup, StreamSource,
@@ -63,5 +64,21 @@ impl AppState {
 
     pub fn install_addon_url(&self, manifest_url: &str) -> Result<AddonDescriptor, String> {
         self.services.install_addon_url(manifest_url)
+    }
+
+    pub fn set_remote_addon_enabled(
+        &self,
+        manifest_url: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        self.services.set_remote_addon_enabled(manifest_url, enabled)
+    }
+
+    pub fn remove_remote_addon(&self, manifest_url: &str) -> Result<(), String> {
+        self.services.remove_remote_addon(manifest_url)
+    }
+
+    pub fn move_remote_addon(&self, manifest_url: &str, direction: MoveDirection) -> Result<(), String> {
+        self.services.move_remote_addon(manifest_url, direction)
     }
 }

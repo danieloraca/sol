@@ -73,7 +73,10 @@ pub struct AddonDescriptor {
     pub name: String,
     pub version: String,
     pub transport: AddonTransport,
+    pub enabled: bool,
     pub configured: bool,
+    pub health_status: String,
+    pub health_message: String,
     pub capabilities: Vec<String>,
     pub source: String,
 }
@@ -81,11 +84,13 @@ pub struct AddonDescriptor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MediaItem {
     pub id: String,
+    pub alternate_ids: Vec<String>,
     pub title: String,
     pub description: String,
     pub media_type: MediaType,
     pub genres: Vec<String>,
     pub poster_url: String,
+    pub backdrop_url: String,
     pub year: u16,
     pub streams: Vec<StreamSource>,
 }

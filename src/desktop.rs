@@ -1,6 +1,8 @@
 use tauri::Manager;
+use std::process::Command;
 
 use crate::{
+    addons::MoveDirection,
     domain::{
         AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, SourceSearchResult, StreamLookup,
         StreamSource,
@@ -24,6 +26,37 @@ fn install_addon_url(
     manifest_url: String,
 ) -> Result<AddonDescriptor, String> {
     state.install_addon_url(&manifest_url)
+}
+
+#[tauri::command]
+fn set_remote_addon_enabled(
+    state: tauri::State<'_, AppState>,
+    manifest_url: String,
+    enabled: bool,
+) -> Result<(), String> {
+    state.set_remote_addon_enabled(&manifest_url, enabled)
+}
+
+#[tauri::command]
+fn remove_remote_addon(
+    state: tauri::State<'_, AppState>,
+    manifest_url: String,
+) -> Result<(), String> {
+    state.remove_remote_addon(&manifest_url)
+}
+
+#[tauri::command]
+fn move_remote_addon(
+    state: tauri::State<'_, AppState>,
+    manifest_url: String,
+    direction: String,
+) -> Result<(), String> {
+    let direction = match direction.trim().to_lowercase().as_str() {
+        "up" => MoveDirection::Up,
+        "down" => MoveDirection::Down,
+        _ => return Err("Direction must be 'up' or 'down'.".into()),
+    };
+    state.move_remote_addon(&manifest_url, direction)
 }
 
 #[tauri::command]
@@ -85,6 +118,40 @@ fn search_sources(
         .ok_or_else(|| format!("No media item found for {id}"))
 }
 
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let url = url.trim().to_string();
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("Only http and https URLs can be opened externally.".into());
+    }
+
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        command.arg(&url);
+        command
+    };
+
+    #[cfg(target_os = "linux")]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(&url);
+        command
+    };
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("cmd");
+        command.args(["/C", "start", "", &url]);
+        command
+    };
+
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Could not open the source externally: {error}"))
+}
+
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::demo())
@@ -97,6 +164,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_addons,
             install_addon_url,
+            set_remote_addon_enabled,
+            remove_remote_addon,
+            move_remote_addon,
             get_home_feed,
             get_catalog,
             search_catalog,
@@ -104,7 +174,8 @@ pub fn run() {
             get_stream_lookup,
             get_streams,
             submit_torbox_magnet,
-            search_sources
+            search_sources,
+            open_external_url
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Sol desktop application");

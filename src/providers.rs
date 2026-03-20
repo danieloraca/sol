@@ -340,11 +340,13 @@ impl TmdbMetadataProvider {
 
         MediaItem {
             id: tmdb_movie_id(movie.id),
+            alternate_ids: vec![],
             title: movie.title,
             description: movie.overview.unwrap_or_else(|| "No overview available yet.".into()),
             media_type: MediaType::Movie,
             genres,
             poster_url: self.poster_url(movie.poster_path.as_deref()),
+            backdrop_url: self.poster_url(movie.backdrop_path.as_deref()),
             year: parse_year(movie.release_date.as_deref()),
             streams: vec![],
         }
@@ -353,11 +355,17 @@ impl TmdbMetadataProvider {
     fn map_movie_detail(&self, movie: TmdbMovieDetails) -> MediaItem {
         MediaItem {
             id: tmdb_movie_id(movie.id),
+            alternate_ids: movie
+                .imdb_id
+                .into_iter()
+                .filter(|value| !value.trim().is_empty())
+                .collect(),
             title: movie.title,
             description: movie.overview.unwrap_or_else(|| "No overview available yet.".into()),
             media_type: MediaType::Movie,
             genres: movie.genres.into_iter().map(|genre| genre.name).collect(),
             poster_url: self.poster_url(movie.poster_path.as_deref()),
+            backdrop_url: self.poster_url(movie.backdrop_path.as_deref()),
             year: parse_year(movie.release_date.as_deref()),
             streams: vec![],
         }
@@ -895,6 +903,7 @@ struct TmdbMovieSummary {
     title: String,
     overview: Option<String>,
     poster_path: Option<String>,
+    backdrop_path: Option<String>,
     release_date: Option<String>,
     genre_ids: Option<Vec<u64>>,
 }
@@ -905,6 +914,9 @@ struct TmdbMovieDetails {
     title: String,
     overview: Option<String>,
     poster_path: Option<String>,
+    backdrop_path: Option<String>,
+    #[serde(default)]
+    imdb_id: Option<String>,
     release_date: Option<String>,
     genres: Vec<TmdbGenre>,
 }
@@ -1043,11 +1055,13 @@ fn parse_year(release_date: Option<&str>) -> u16 {
 fn unavailable_placeholder() -> MediaItem {
     MediaItem {
         id: "placeholder:unavailable".into(),
+        alternate_ids: vec![],
         title: "No TMDB results available".into(),
         description: "Set a TMDB API key or read token to load a real movie catalog.".into(),
         media_type: MediaType::Movie,
         genres: vec!["Setup".into()],
         poster_url: String::new(),
+        backdrop_url: String::new(),
         year: 0,
         streams: vec![],
     }
@@ -1244,11 +1258,13 @@ fn seed_catalog() -> Vec<MediaItem> {
     vec![
         MediaItem {
             id: "movie:solstice".into(),
+            alternate_ids: vec![],
             title: "Solstice Run".into(),
             description: "A courier races across flooded cities to deliver a memory core before sunrise.".into(),
             media_type: MediaType::Movie,
             genres: vec!["Sci-Fi".into(), "Thriller".into()],
             poster_url: "https://images.example.com/solstice-run.jpg".into(),
+            backdrop_url: "https://images.example.com/solstice-run-hero.jpg".into(),
             year: 2026,
             streams: vec![
                 StreamSource {
@@ -1271,11 +1287,13 @@ fn seed_catalog() -> Vec<MediaItem> {
         },
         MediaItem {
             id: "series:night-shift".into(),
+            alternate_ids: vec![],
             title: "Night Shift Atlas".into(),
             description: "A crew of orbital cartographers uncover a signal buried in forgotten star maps.".into(),
             media_type: MediaType::Series,
             genres: vec!["Sci-Fi".into(), "Mystery".into()],
             poster_url: "https://images.example.com/night-shift-atlas.jpg".into(),
+            backdrop_url: "https://images.example.com/night-shift-atlas-hero.jpg".into(),
             year: 2025,
             streams: vec![StreamSource {
                 name: "Season 1".into(),
@@ -1288,11 +1306,13 @@ fn seed_catalog() -> Vec<MediaItem> {
         },
         MediaItem {
             id: "channel:lofi-cosmos".into(),
+            alternate_ids: vec![],
             title: "Lo-Fi Cosmos".into(),
             description: "Continuous chill beats and slow nebula visuals for deep focus sessions.".into(),
             media_type: MediaType::Channel,
             genres: vec!["Music".into(), "Ambient".into()],
             poster_url: "https://images.example.com/lofi-cosmos.jpg".into(),
+            backdrop_url: "https://images.example.com/lofi-cosmos-hero.jpg".into(),
             year: 2026,
             streams: vec![StreamSource {
                 name: "Live".into(),
@@ -1305,11 +1325,13 @@ fn seed_catalog() -> Vec<MediaItem> {
         },
         MediaItem {
             id: "movie:quiet-voltage".into(),
+            alternate_ids: vec![],
             title: "Quiet Voltage".into(),
             description: "An audio engineer discovers a citywide blackout is being choreographed like a symphony.".into(),
             media_type: MediaType::Movie,
             genres: vec!["Drama".into(), "Mystery".into()],
             poster_url: "https://images.example.com/quiet-voltage.jpg".into(),
+            backdrop_url: "https://images.example.com/quiet-voltage-hero.jpg".into(),
             year: 2024,
             streams: vec![StreamSource {
                 name: "Theatrical".into(),
@@ -1367,11 +1389,13 @@ mod tests {
 
         let item = MediaItem {
             id: "movie:solstice".into(),
+            alternate_ids: vec![],
             title: "Solstice Run".into(),
             description: String::new(),
             media_type: MediaType::Movie,
             genres: vec![],
             poster_url: String::new(),
+            backdrop_url: String::new(),
             year: 2026,
             streams: vec![],
         };
@@ -1425,11 +1449,13 @@ mod tests {
         };
         let item = MediaItem {
             id: "tmdb:movie:1".into(),
+            alternate_ids: vec![],
             title: "War Machine".into(),
             description: String::new(),
             media_type: MediaType::Movie,
             genres: vec![],
             poster_url: String::new(),
+            backdrop_url: String::new(),
             year: 2026,
             streams: vec![],
         };

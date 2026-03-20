@@ -152,41 +152,115 @@ impl AddonRegistry {
     }
 
     pub fn stream_lookup(&self, item: &MediaItem) -> StreamLookup {
-        let mut first = None;
+        let lookups = self
+            .addons
+            .iter()
+            .filter_map(|addon| addon.stream_lookup(item))
+            .collect::<Vec<_>>();
 
-        for addon in &self.addons {
-            let Some(lookup) = addon.stream_lookup(item) else {
-                continue;
+        let streams = dedupe_stream_sources(
+            lookups
+                .iter()
+                .flat_map(|lookup| lookup.streams.clone())
+                .collect(),
+        );
+        let candidates = lookups
+            .iter()
+            .flat_map(|lookup| lookup.candidates.clone())
+            .collect::<Vec<_>>();
+
+        if !streams.is_empty() {
+            let provider_names = lookups
+                .iter()
+                .filter(|lookup| !lookup.streams.is_empty())
+                .map(|lookup| lookup.provider.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+
+            let status = if streams.iter().any(|stream| stream.playback_kind == "embedded") {
+                "ready"
+            } else if streams.iter().any(|stream| stream.playback_kind == "external") {
+                "external_only"
+            } else {
+                "blocked_only"
             };
 
-            if !lookup.streams.is_empty() {
-                return lookup;
-            }
+            let message = match status {
+                "ready" => format!(
+                    "Found {} stream source(s) across {}.",
+                    streams.len(),
+                    provider_names.join(", ")
+                ),
+                "external_only" => format!(
+                    "Found {} source(s), but they currently open outside the app.",
+                    streams.len()
+                ),
+                _ => format!(
+                    "Found {} source(s), but they are currently blocked in the embedded player.",
+                    streams.len()
+                ),
+            };
 
-            if first.is_none() {
-                first = Some(lookup);
-            }
+            return StreamLookup {
+                provider: "Addons".into(),
+                status: status.into(),
+                message,
+                streams,
+                candidates,
+            };
         }
 
-        first.unwrap_or_else(|| StreamLookup {
+        lookups.into_iter().next().unwrap_or_else(|| StreamLookup {
             provider: "Addons".into(),
             status: "unavailable".into(),
             message: format!("No addon returned streams for {}.", item.title),
             streams: vec![],
-            candidates: vec![],
+            candidates,
         })
     }
 
     pub fn source_search(&self, item: &MediaItem) -> SourceSearchResult {
-        self.addons
+        let results = self
+            .addons
             .iter()
-            .find_map(|addon| addon.source_search(item))
-            .unwrap_or_else(|| SourceSearchResult {
+            .filter_map(|addon| addon.source_search(item))
+            .collect::<Vec<_>>();
+
+        let releases = dedupe_source_releases(
+            results
+                .iter()
+                .flat_map(|result| result.releases.clone())
+                .collect(),
+        );
+
+        if !releases.is_empty() {
+            let provider_names = results
+                .iter()
+                .filter(|result| !result.releases.is_empty())
+                .map(|result| result.provider.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+
+            return SourceSearchResult {
                 provider: "Addons".into(),
-                status: "unavailable".into(),
-                message: "No source-search addon is configured.".into(),
-                releases: vec![],
-            })
+                status: "ready".into(),
+                message: format!(
+                    "Found {} source candidate(s) across {}.",
+                    releases.len(),
+                    provider_names.join(", ")
+                ),
+                releases,
+            };
+        }
+
+        results.into_iter().next().unwrap_or_else(|| SourceSearchResult {
+            provider: "Addons".into(),
+            status: "unavailable".into(),
+            message: "No source-search addon is configured.".into(),
+            releases: vec![],
+        })
     }
 
     pub fn submit_magnet(
@@ -221,36 +295,172 @@ impl Default for AddonStore {
 }
 
 impl AddonStore {
-    pub fn load_urls(&self) -> Vec<String> {
-        fs::read_to_string(&self.path)
-            .ok()
-            .and_then(|raw| serde_json::from_str::<StoredAddonUrls>(&raw).ok())
-            .map(|stored| stored.manifest_urls)
+    pub fn load_settings(&self) -> StoredAddonSettings {
+        let Some(raw) = fs::read_to_string(&self.path).ok() else {
+            return StoredAddonSettings::default();
+        };
+
+        if let Ok(settings) = serde_json::from_str::<StoredAddonSettings>(&raw) {
+            return settings;
+        }
+
+        serde_json::from_str::<LegacyStoredAddonUrls>(&raw)
+            .map(StoredAddonSettings::from_legacy)
             .unwrap_or_default()
     }
 
-    pub fn install_url(&self, url: &str) -> Result<(), String> {
-        let mut urls = self.load_urls();
+    pub fn install_remote_addon(
+        &self,
+        url: &str,
+        descriptor: &AddonDescriptor,
+    ) -> Result<(), String> {
+        let mut settings = self.load_settings();
         let normalized = url.trim().to_string();
         if normalized.is_empty() {
             return Err("Paste an addon manifest URL first.".into());
         }
 
-        if !urls.iter().any(|existing| existing == &normalized) {
-            urls.push(normalized);
+        if let Some(existing) = settings
+            .remote_addons
+            .iter_mut()
+            .find(|addon| addon.manifest_url == normalized)
+        {
+            existing.enabled = true;
+            existing.id = descriptor.id.clone();
+            existing.name = descriptor.name.clone();
+            existing.version = descriptor.version.clone();
+            existing.capabilities = descriptor.capabilities.clone();
+        } else {
+            settings.remote_addons.push(StoredRemoteAddon {
+                manifest_url: normalized,
+                enabled: true,
+                id: descriptor.id.clone(),
+                name: descriptor.name.clone(),
+                version: descriptor.version.clone(),
+                capabilities: descriptor.capabilities.clone(),
+            });
         }
 
-        let payload = StoredAddonUrls {
-            manifest_urls: urls,
+        self.save_settings(&settings)
+    }
+
+    pub fn enabled_urls(&self) -> Vec<String> {
+        self.load_settings()
+            .remote_addons
+            .into_iter()
+            .filter(|addon| addon.enabled)
+            .map(|addon| addon.manifest_url)
+            .collect()
+    }
+
+    pub fn remote_addons(&self) -> Vec<StoredRemoteAddon> {
+        self.load_settings().remote_addons
+    }
+
+    pub fn set_remote_enabled(&self, manifest_url: &str, enabled: bool) -> Result<(), String> {
+        let mut settings = self.load_settings();
+        let addon = settings
+            .remote_addons
+            .iter_mut()
+            .find(|addon| addon.manifest_url == manifest_url)
+            .ok_or_else(|| "That addon is not installed.".to_string())?;
+        addon.enabled = enabled;
+        self.save_settings(&settings)
+    }
+
+    pub fn remove_remote_addon(&self, manifest_url: &str) -> Result<(), String> {
+        let mut settings = self.load_settings();
+        let starting_len = settings.remote_addons.len();
+        settings
+            .remote_addons
+            .retain(|addon| addon.manifest_url != manifest_url);
+
+        if settings.remote_addons.len() == starting_len {
+            return Err("That addon is not installed.".into());
+        }
+
+        self.save_settings(&settings)
+    }
+
+    pub fn move_remote_addon(&self, manifest_url: &str, direction: MoveDirection) -> Result<(), String> {
+        let mut settings = self.load_settings();
+        let Some(index) = settings
+            .remote_addons
+            .iter()
+            .position(|addon| addon.manifest_url == manifest_url)
+        else {
+            return Err("That addon is not installed.".into());
         };
-        let raw = serde_json::to_string_pretty(&payload)
+
+        let target = match direction {
+            MoveDirection::Up if index > 0 => index - 1,
+            MoveDirection::Down if index + 1 < settings.remote_addons.len() => index + 1,
+            MoveDirection::Up | MoveDirection::Down => return Ok(()),
+        };
+
+        settings.remote_addons.swap(index, target);
+        self.save_settings(&settings)
+    }
+
+    fn save_settings(&self, settings: &StoredAddonSettings) -> Result<(), String> {
+        let raw = serde_json::to_string_pretty(settings)
             .map_err(|error| format!("Could not serialize addon settings: {error}"))?;
         fs::write(&self.path, raw).map_err(|error| format!("Could not save addon settings: {error}"))
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum MoveDirection {
+    Up,
+    Down,
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+pub struct StoredAddonSettings {
+    #[serde(default)]
+    remote_addons: Vec<StoredRemoteAddon>,
+}
+
+impl StoredAddonSettings {
+    fn from_legacy(legacy: LegacyStoredAddonUrls) -> Self {
+        Self {
+            remote_addons: legacy
+                .manifest_urls
+                .into_iter()
+                .map(|manifest_url| StoredRemoteAddon {
+                    manifest_url,
+                    enabled: true,
+                    id: String::new(),
+                    name: String::new(),
+                    version: String::new(),
+                    capabilities: vec![],
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct StoredRemoteAddon {
+    pub manifest_url: String,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize)]
-struct StoredAddonUrls {
+struct LegacyStoredAddonUrls {
     manifest_urls: Vec<String>,
 }
 
@@ -281,7 +491,10 @@ impl SolAddon for DemoCatalogAddon {
             name: "Demo Catalog".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             transport: AddonTransport::Builtin,
+            enabled: true,
             configured: true,
+            health_status: "healthy".into(),
+            health_message: "Built-in demo data is available.".into(),
             capabilities: vec!["catalog".into(), "meta".into(), "stream".into()],
             source: "bundled".into(),
         }
@@ -327,7 +540,18 @@ impl SolAddon for TmdbMetadataAddon {
             name: "TMDB Metadata".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             transport: AddonTransport::Builtin,
+            enabled: true,
             configured: self.provider.is_some(),
+            health_status: if self.provider.is_some() {
+                "healthy".into()
+            } else {
+                "setup_required".into()
+            },
+            health_message: if self.provider.is_some() {
+                "TMDB credentials detected. Real movie metadata is available.".into()
+            } else {
+                "Set TMDB_API_READ_TOKEN or TMDB_API_KEY to load TMDB metadata.".into()
+            },
             capabilities: vec!["catalog".into(), "meta".into(), "search".into()],
             source: "env:TMDB_API_READ_TOKEN|TMDB_API_KEY".into(),
         }
@@ -371,7 +595,18 @@ impl SolAddon for TorboxStreamAddon {
             name: "TorBox Streams".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             transport: AddonTransport::Builtin,
+            enabled: true,
             configured: self.provider.is_configured(),
+            health_status: if self.provider.is_configured() {
+                "healthy".into()
+            } else {
+                "setup_required".into()
+            },
+            health_message: if self.provider.is_configured() {
+                "TorBox API key detected. Library stream lookup is available.".into()
+            } else {
+                "Set TORBOX_API_KEY to look up and create TorBox streams.".into()
+            },
             capabilities: vec!["stream".into(), "submit".into()],
             source: "env:TORBOX_API_KEY".into(),
         }
@@ -410,7 +645,18 @@ impl SolAddon for ProwlarrSearchAddon {
             name: "Prowlarr Search".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             transport: AddonTransport::Builtin,
+            enabled: true,
             configured: self.provider.is_configured(),
+            health_status: if self.provider.is_configured() {
+                "healthy".into()
+            } else {
+                "setup_required".into()
+            },
+            health_message: if self.provider.is_configured() {
+                "Prowlarr URL and API key detected. Source search is available.".into()
+            } else {
+                "Set PROWLARR_URL and PROWLARR_API_KEY to search releases automatically.".into()
+            },
             capabilities: vec!["source_search".into()],
             source: "env:PROWLARR_URL|PROWLARR_API_KEY".into(),
         }
@@ -556,15 +802,13 @@ impl RemoteHttpAddon {
     }
 
     fn stream_response(&self, item: &MediaItem) -> Option<RemoteStreamResponse> {
-        if !self.supports_resource("stream", Some(item.media_type.clone()), Some(&item.id)) {
-            return None;
-        }
+        let stream_id = select_supported_resource_id(self, "stream", item)?;
 
         self.fetch_json::<RemoteStreamResponse>(format!(
             "{}/stream/{}/{}.json",
             self.base_url,
             media_type_to_remote(&item.media_type),
-            encode_path_value(&item.id)
+            encode_path_value(&stream_id)
         ))
     }
 }
@@ -576,7 +820,10 @@ impl SolAddon for RemoteHttpAddon {
             name: self.manifest.name.clone(),
             version: self.manifest.version.clone(),
             transport: AddonTransport::Remote,
+            enabled: true,
             configured: true,
+            health_status: "healthy".into(),
+            health_message: "Remote addon manifest loaded successfully.".into(),
             capabilities: self.manifest.capabilities(),
             source: self.manifest_url.clone(),
         }
@@ -625,6 +872,10 @@ impl SolAddon for RemoteHttpAddon {
             .streams
             .into_iter()
             .filter_map(map_remote_stream_source)
+            .map(|mut stream| {
+                stream.name = format!("{} • {}", self.manifest.name, stream.name);
+                stream
+            })
             .collect::<Vec<_>>();
 
         Some(StreamLookup {
@@ -721,6 +972,36 @@ impl RemoteResourceObject {
     }
 }
 
+fn select_supported_resource_id(
+    addon: &RemoteHttpAddon,
+    resource_name: &str,
+    item: &MediaItem,
+) -> Option<String> {
+    media_id_candidates(item)
+        .into_iter()
+        .find(|candidate| {
+            addon.supports_resource(
+                resource_name,
+                Some(item.media_type.clone()),
+                Some(candidate.as_str()),
+            )
+        })
+        .or_else(|| {
+            addon.supports_resource(resource_name, Some(item.media_type.clone()), Some(&item.id))
+                .then(|| item.id.clone())
+        })
+}
+
+fn media_id_candidates(item: &MediaItem) -> Vec<String> {
+    let mut ids = vec![item.id.clone()];
+    for alternate in &item.alternate_ids {
+        if !ids.iter().any(|existing| existing == alternate) {
+            ids.push(alternate.clone());
+        }
+    }
+    ids
+}
+
 #[derive(Clone, Deserialize)]
 struct RemoteCatalog {
     #[serde(rename = "type")]
@@ -772,6 +1053,8 @@ struct RemoteMetaPreview {
     #[serde(default)]
     poster: Option<String>,
     #[serde(default)]
+    background: Option<String>,
+    #[serde(default)]
     description: Option<String>,
     #[serde(rename = "releaseInfo", default)]
     release_info: Option<String>,
@@ -802,11 +1085,13 @@ struct RemoteStream {
 fn unavailable_placeholder() -> MediaItem {
     MediaItem {
         id: "placeholder:addons".into(),
+        alternate_ids: vec![],
         title: "No addons available".into(),
         description: "Configure at least one metadata addon to load a real catalog.".into(),
         media_type: MediaType::Movie,
         genres: vec!["Setup".into()],
         poster_url: String::new(),
+        backdrop_url: String::new(),
         year: 0,
         streams: vec![],
     }
@@ -817,6 +1102,39 @@ fn dedupe_media_items(items: Vec<MediaItem>) -> Vec<MediaItem> {
     items.into_iter()
         .filter(|item| seen.insert(item.id.clone()))
         .collect()
+}
+
+fn dedupe_stream_sources(mut streams: Vec<StreamSource>) -> Vec<StreamSource> {
+    streams.sort_by_key(|stream| {
+        (
+            playback_rank(&stream.playback_kind),
+            stream.name.clone(),
+            stream.url.clone(),
+        )
+    });
+
+    let mut seen = BTreeSet::new();
+    streams
+        .into_iter()
+        .filter(|stream| seen.insert(stream.url.clone()))
+        .collect()
+}
+
+fn dedupe_source_releases(releases: Vec<SourceRelease>) -> Vec<SourceRelease> {
+    let mut seen = BTreeSet::new();
+    releases
+        .into_iter()
+        .filter(|release| seen.insert(release.magnet_url.clone()))
+        .collect()
+}
+
+fn playback_rank(playback_kind: &str) -> u8 {
+    match playback_kind {
+        "embedded" => 0,
+        "external" => 1,
+        "blocked" => 2,
+        _ => 3,
+    }
 }
 
 fn addon_base_url(manifest_url: &str) -> String {
@@ -857,13 +1175,16 @@ fn remote_supported_types(manifest: &RemoteManifest) -> Vec<MediaType> {
 }
 
 fn map_remote_meta_preview(meta: RemoteMetaPreview) -> Option<MediaItem> {
+    let poster_url = meta.poster.clone().unwrap_or_default();
     Some(MediaItem {
         id: meta.id,
+        alternate_ids: vec![],
         title: meta.title,
         description: meta.description.unwrap_or_else(|| "No description provided by addon.".into()),
         media_type: parse_remote_media_type(meta.media_type.as_deref())?,
         genres: meta.genres.unwrap_or_default(),
-        poster_url: meta.poster.unwrap_or_default(),
+        poster_url,
+        backdrop_url: meta.background.or(meta.poster).unwrap_or_default(),
         year: parse_release_year(meta.release_info.as_deref()),
         streams: vec![],
     })
@@ -875,16 +1196,24 @@ fn map_remote_meta_value(value: serde_json::Value) -> Option<MediaItem> {
 }
 
 fn map_remote_stream_source(stream: RemoteStream) -> Option<StreamSource> {
-    let url = stream.url?;
-    let playback_kind = if url.starts_with("http://") {
-        "blocked".to_string()
-    } else {
-        "embedded".to_string()
-    };
-    let playback_note = if playback_kind == "blocked" {
-        "This source uses plain HTTP and cannot be embedded here.".to_string()
-    } else {
-        "Playable in the in-app player.".to_string()
+    let (url, playback_kind, playback_note) = match (stream.url, stream.external_url) {
+        (Some(url), _) if url.starts_with("http://") => (
+            url,
+            "blocked".to_string(),
+            "This source uses plain HTTP and cannot be embedded here. Open it externally instead."
+                .to_string(),
+        ),
+        (Some(url), _) => (
+            url,
+            "embedded".to_string(),
+            "Playable in the in-app player.".to_string(),
+        ),
+        (None, Some(url)) => (
+            url,
+            "external".to_string(),
+            "This source opens outside the app.".to_string(),
+        ),
+        (None, None) => return None,
     };
     Some(StreamSource {
         name: stream.name.or(stream.title).unwrap_or_else(|| "Remote stream".into()),
@@ -905,8 +1234,8 @@ fn map_remote_stream_source_release(stream: RemoteStream) -> Option<SourceReleas
     let magnet_url = stream
         .info_hash
         .map(|hash| format!("magnet:?xt=urn:btih:{hash}"))
-        .or(stream.url)
-        .or(stream.external_url)?;
+        .or_else(|| stream.url.filter(|value| value.starts_with("magnet:?")))
+        .or_else(|| stream.external_url.filter(|value| value.starts_with("magnet:?")))?;
 
     Some(SourceRelease {
         title: title.clone(),
@@ -982,7 +1311,13 @@ fn resource_name_matches(actual: &str, expected: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::AddonRegistry;
+    use reqwest::blocking::Client;
+
+    use super::{
+        AddonRegistry, RemoteHttpAddon, RemoteManifest, RemoteResourceEntry, RemoteResourceObject,
+        media_id_candidates, select_supported_resource_id,
+    };
+    use crate::domain::{MediaItem, MediaType};
 
     #[test]
     fn builtin_registry_contains_demo_addon() {
@@ -992,5 +1327,62 @@ mod tests {
 
         assert!(descriptors.iter().any(|addon| addon.id == "builtin.demo"));
         assert!(descriptors.iter().any(|addon| addon.id == "builtin.torbox"));
+    }
+
+    #[test]
+    fn media_id_candidates_include_primary_and_alternates() {
+        let item = MediaItem {
+            id: "tmdb:movie:123".into(),
+            alternate_ids: vec!["tt1234567".into(), "tmdb:movie:123".into()],
+            title: "Test".into(),
+            description: String::new(),
+            media_type: MediaType::Movie,
+            genres: vec![],
+            poster_url: String::new(),
+            backdrop_url: String::new(),
+            year: 2026,
+            streams: vec![],
+        };
+
+        let ids = media_id_candidates(&item);
+
+        assert_eq!(ids, vec!["tmdb:movie:123".to_string(), "tt1234567".to_string()]);
+    }
+
+    #[test]
+    fn select_supported_resource_id_prefers_matching_alternate_id() {
+        let addon = RemoteHttpAddon {
+            manifest_url: "https://example.com/manifest.json".into(),
+            base_url: "https://example.com".into(),
+            manifest: RemoteManifest {
+                id: "test.addon".into(),
+                version: "1.0.0".into(),
+                name: "Test Addon".into(),
+                resources: vec![RemoteResourceEntry::Object(RemoteResourceObject {
+                    name: "stream".into(),
+                    types: vec!["movie".into()],
+                    id_prefixes: vec!["tt".into()],
+                })],
+                catalogs: vec![],
+                types: vec!["movie".into()],
+            },
+            client: Client::builder().build().expect("test client should build"),
+        };
+        let item = MediaItem {
+            id: "tmdb:movie:123".into(),
+            alternate_ids: vec!["tt1234567".into()],
+            title: "Test".into(),
+            description: String::new(),
+            media_type: MediaType::Movie,
+            genres: vec![],
+            poster_url: String::new(),
+            backdrop_url: String::new(),
+            year: 2026,
+            streams: vec![],
+        };
+
+        let id = select_supported_resource_id(&addon, "stream", &item);
+
+        assert_eq!(id.as_deref(), Some("tt1234567"));
     }
 }

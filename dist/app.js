@@ -12,6 +12,7 @@ const addonUrlEl = document.querySelector("#addon-url");
 const installAddonButtonEl = document.querySelector("#install-addon");
 const addonFeedbackEl = document.querySelector("#addon-feedback");
 const addonsListEl = document.querySelector("#addons-list");
+const addonDetailsEl = document.querySelector("#addon-details");
 const filterButtons = [...document.querySelectorAll(".filter")];
 const TORBOX_AUTO_REFRESH_INTERVAL_MS = 5000;
 const TORBOX_AUTO_REFRESH_MAX_ATTEMPTS = 24;
@@ -31,6 +32,7 @@ let playbackCurrentSeconds = 0;
 let playbackDurationSeconds = 0;
 let pendingSeekSeconds = null;
 let lastPlaybackError = "";
+let lastPlaybackNotice = "";
 let playbackStartTimer = null;
 let torboxSubmissionState = null;
 let torboxDraftMagnet = "";
@@ -39,6 +41,8 @@ let torboxAutoRefreshTimer = null;
 let torboxAutoRefreshAttempt = 0;
 let sourceSearchState = null;
 let installedAddons = [];
+let selectedAddonSource = null;
+let autoPlayPending = false;
 
 async function bootstrap() {
   if (!invoke) {
@@ -74,12 +78,7 @@ async function bootstrap() {
       const descriptor = await invoke("install_addon_url", { manifestUrl });
       addonFeedbackEl.textContent = `Installed ${descriptor.name}. Reloading catalog...`;
       addonUrlEl.value = "";
-      await renderAddons();
-      await renderHome();
-      await renderCatalog();
-      if (homeFeed?.hero?.id) {
-        await selectItem(homeFeed.hero.id);
-      }
+      await reloadAddonDrivenViews();
       addonFeedbackEl.textContent = `Installed ${descriptor.name}.`;
     } catch (error) {
       addonFeedbackEl.textContent = String(error);
@@ -92,8 +91,8 @@ async function renderHome() {
   cacheItems([homeFeed.hero, ...homeFeed.trending, ...homeFeed.continue_watching]);
 
   heroEl.innerHTML = `
-    <div class="hero-media ${homeFeed.hero.poster_url ? "" : "is-fallback"}">
-      ${renderPosterImage(homeFeed.hero, "hero-poster")}
+    <div class="hero-media ${heroArtworkUrl(homeFeed.hero) ? "" : "is-fallback"}">
+      ${renderArtworkImage(homeFeed.hero, "hero-poster")}
       <div class="hero-copy">
         <p class="eyebrow">Featured</p>
         <h2>${homeFeed.hero.title}</h2>
@@ -126,22 +125,191 @@ async function renderCatalog() {
 
 async function renderAddons() {
   installedAddons = await invoke("get_addons");
+  if (!selectedAddonSource || !installedAddons.some((addon) => addon.source === selectedAddonSource)) {
+    selectedAddonSource = installedAddons[0]?.source ?? null;
+  }
   addonsListEl.innerHTML = installedAddons
     .map(
       (addon) => `
-        <article class="addon-card">
+        <article class="addon-card ${addon.source === selectedAddonSource ? "is-active" : ""}" data-addon-select="${escapeHtml(addon.source)}">
           <div class="addon-card-copy">
             <h3>${escapeHtml(addon.name)}</h3>
             <p class="meta">${escapeHtml(addon.id)} • ${escapeHtml(addon.transport)}</p>
             <p class="meta">${escapeHtml(addon.capabilities.join(" / "))}</p>
           </div>
-          <span class="provider-badge ${addon.configured ? "is-success" : "is-error"}">
-            ${addon.configured ? "Configured" : "Needs setup"}
-          </span>
+          <div class="addon-card-meta">
+            <span class="provider-badge ${addon.enabled ? "is-success" : "is-neutral"}">
+              ${addon.enabled ? "Enabled" : "Disabled"}
+            </span>
+            <span class="provider-badge ${addon.configured ? "is-success" : "is-error"}">
+              ${addon.configured ? "Configured" : "Needs setup"}
+            </span>
+            <span class="provider-badge ${addonHealthClass(addon)}">
+              ${escapeHtml(addonHealthLabel(addon))}
+            </span>
+          </div>
+          <p class="meta">${escapeHtml(addon.health_message)}</p>
+          ${
+            addon.transport === "remote"
+              ? `
+                <div class="addon-actions">
+                  <button class="ghost-button addon-action" data-addon-move="up" data-addon-source="${escapeHtml(addon.source)}">Up</button>
+                  <button class="ghost-button addon-action" data-addon-move="down" data-addon-source="${escapeHtml(addon.source)}">Down</button>
+                  <button class="ghost-button addon-action" data-addon-toggle="${escapeHtml(addon.source)}" data-addon-enabled="${addon.enabled}">
+                    ${addon.enabled ? "Disable" : "Enable"}
+                  </button>
+                  <button class="ghost-button addon-action is-danger" data-addon-remove="${escapeHtml(addon.source)}">Remove</button>
+                </div>
+              `
+              : `<p class="meta">Built-in addon</p>`
+          }
         </article>
       `,
     )
     .join("");
+
+  renderAddonDetails();
+  bindAddonActions();
+}
+
+function bindAddonActions() {
+  addonsListEl.querySelectorAll("[data-addon-select]").forEach((card) => {
+    card.addEventListener("click", () => {
+      selectedAddonSource = card.dataset.addonSelect;
+      renderAddons();
+    });
+  });
+
+  bindAddonManagementActions(addonsListEl);
+  bindAddonManagementActions(addonDetailsEl);
+
+  addonDetailsEl.querySelectorAll("[data-addon-open]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const url = button.dataset.addonOpen;
+      addonFeedbackEl.textContent = "Opening addon manifest...";
+
+      try {
+        await invoke("open_external_url", { url });
+        addonFeedbackEl.textContent = "Opened addon manifest.";
+      } catch (error) {
+        addonFeedbackEl.textContent = String(error);
+      }
+    });
+  });
+}
+
+function bindAddonManagementActions(scope) {
+  scope.querySelectorAll("[data-addon-toggle]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const manifestUrl = button.dataset.addonToggle;
+      const enabled = button.dataset.addonEnabled !== "true";
+      addonFeedbackEl.textContent = `${enabled ? "Enabling" : "Disabling"} addon...`;
+
+      try {
+        await invoke("set_remote_addon_enabled", { manifestUrl, enabled });
+        await reloadAddonDrivenViews();
+        addonFeedbackEl.textContent = `Addon ${enabled ? "enabled" : "disabled"}.`;
+      } catch (error) {
+        addonFeedbackEl.textContent = String(error);
+      }
+    });
+  });
+
+  scope.querySelectorAll("[data-addon-remove]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const manifestUrl = button.dataset.addonRemove;
+      addonFeedbackEl.textContent = "Removing addon...";
+
+      try {
+        await invoke("remove_remote_addon", { manifestUrl });
+        await reloadAddonDrivenViews();
+        addonFeedbackEl.textContent = "Addon removed.";
+      } catch (error) {
+        addonFeedbackEl.textContent = String(error);
+      }
+    });
+  });
+
+  scope.querySelectorAll("[data-addon-move]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const manifestUrl = button.dataset.addonSource;
+      const direction = button.dataset.addonMove;
+      addonFeedbackEl.textContent = `Moving addon ${direction}...`;
+
+      try {
+        await invoke("move_remote_addon", { manifestUrl, direction });
+        await reloadAddonDrivenViews();
+        addonFeedbackEl.textContent = `Addon moved ${direction}.`;
+      } catch (error) {
+        addonFeedbackEl.textContent = String(error);
+      }
+    });
+  });
+}
+
+function renderAddonDetails() {
+  const addon = installedAddons.find((item) => item.source === selectedAddonSource) ?? installedAddons[0];
+  if (!addon) {
+    addonDetailsEl.innerHTML = "";
+    return;
+  }
+
+  addonDetailsEl.innerHTML = `
+    <article class="addon-details-card">
+      <div class="section-heading">
+        <p class="eyebrow">Addon details</p>
+        <h2>${escapeHtml(addon.name)}</h2>
+      </div>
+      <div class="addon-card-meta">
+        <span class="provider-badge ${addon.enabled ? "is-success" : "is-neutral"}">${addon.enabled ? "Enabled" : "Disabled"}</span>
+        <span class="provider-badge ${addon.configured ? "is-success" : "is-error"}">${addon.configured ? "Configured" : "Needs setup"}</span>
+        <span class="provider-badge ${addonHealthClass(addon)}">${escapeHtml(addonHealthLabel(addon))}</span>
+      </div>
+      <p class="meta">${escapeHtml(addon.id)} • v${escapeHtml(addon.version || "unknown")} • ${escapeHtml(addon.transport)}</p>
+      <p class="meta"><strong>Capabilities:</strong> ${escapeHtml(addon.capabilities.join(" / ") || "none")}</p>
+      <p class="meta"><strong>Source:</strong> ${escapeHtml(addon.source)}</p>
+      <p class="meta"><strong>Health:</strong> ${escapeHtml(addon.health_message)}</p>
+      <p class="meta">${escapeHtml(addonSettingsHint(addon))}</p>
+      ${
+        addon.transport === "remote"
+          ? `
+            <div class="addon-actions addon-actions-detail">
+              <button class="ghost-button addon-action" data-addon-open="${escapeHtml(addon.source)}">Open manifest</button>
+              <button class="ghost-button addon-action" data-addon-move="up" data-addon-source="${escapeHtml(addon.source)}">Move up</button>
+              <button class="ghost-button addon-action" data-addon-move="down" data-addon-source="${escapeHtml(addon.source)}">Move down</button>
+              <button class="ghost-button addon-action" data-addon-toggle="${escapeHtml(addon.source)}" data-addon-enabled="${addon.enabled}">
+                ${addon.enabled ? "Disable addon" : "Enable addon"}
+              </button>
+              <button class="ghost-button addon-action is-danger" data-addon-remove="${escapeHtml(addon.source)}">Remove addon</button>
+            </div>
+          `
+          : `
+            <div class="addon-actions addon-actions-detail">
+              <button class="ghost-button addon-action" disabled>Built-in addon</button>
+            </div>
+          `
+      }
+    </article>
+  `;
+}
+
+async function reloadAddonDrivenViews() {
+  await renderAddons();
+  await renderHome();
+  await renderCatalog();
+
+  const preferredId = selectedItemId || homeFeed?.hero?.id;
+  if (!preferredId) {
+    return;
+  }
+
+  try {
+    await selectItem(preferredId);
+  } catch (_error) {
+    if (homeFeed?.hero?.id) {
+      await selectItem(homeFeed.hero.id);
+    }
+  }
 }
 
 async function handleSearch(event) {
@@ -175,15 +343,13 @@ function bindHeroButtons() {
   heroEl.querySelectorAll("[data-play-hero], [data-open-hero]").forEach((button) => {
     button.addEventListener("click", async () => {
       const id = button.dataset.playHero ?? button.dataset.openHero;
-      await selectItem(id);
-      if (button.dataset.playHero) {
-        setPlaybackState(true);
-      }
+      await selectItem(id, { autoPlay: Boolean(button.dataset.playHero) });
     });
   });
 }
 
-async function selectItem(id) {
+async function selectItem(id, options = {}) {
+  const { autoPlay = false } = options;
   try {
     const item = await getItem(id);
     if (id !== selectedItemId) {
@@ -202,15 +368,22 @@ async function selectItem(id) {
     playbackCurrentSeconds = 0;
     playbackDurationSeconds = estimateRuntimeSeconds(item);
     lastPlaybackError = "";
+    lastPlaybackNotice = "";
     if (selectedStreams.length > 0) {
       stopTorboxAutoRefresh();
       renderPlayer(item);
       renderStreams(item.title);
+      if (autoPlay) {
+        setPlaybackState(true);
+      }
     } else {
       setPlaybackState(false);
       renderNoStreams(item, selectedLookup);
-      if (selectedLookup?.provider === "TorBox") {
+      if (showAutomaticSourceActions()) {
         void ensureSourceSearch(id);
+      }
+      if (autoPlay) {
+        await attemptAutoPlay(item);
       }
     }
   } catch (error) {
@@ -219,13 +392,16 @@ async function selectItem(id) {
 }
 
 async function getItem(id) {
-  if (itemCache.has(id)) {
-    return itemCache.get(id);
+  try {
+    const item = await invoke("get_media_item", { id });
+    itemCache.set(id, item);
+    return item;
+  } catch (error) {
+    if (itemCache.has(id)) {
+      return itemCache.get(id);
+    }
+    throw error;
   }
-
-  const item = await invoke("get_media_item", { id });
-  itemCache.set(id, item);
-  return item;
 }
 
 function renderPlayer(item) {
@@ -235,13 +411,18 @@ function renderPlayer(item) {
   }
 
   const activeStream = selectedStreams[selectedStreamIndex];
-  const escapedPoster = item.poster_url ? `poster="${escapeHtml(item.poster_url)}"` : "";
+  if (activeStream.playback_kind !== "embedded") {
+    renderHandoffPlayer(item, activeStream);
+    return;
+  }
+  const videoPoster = heroArtworkUrl(item) || item.poster_url;
+  const escapedPoster = videoPoster ? `poster="${escapeHtml(videoPoster)}"` : "";
 
   playerStageEl.innerHTML = `
     <div class="player-screen is-video">
-      <div class="player-video-shell ${item.poster_url ? "" : "is-fallback"}">
-        <div class="player-art ${item.poster_url ? "" : "is-fallback"}">
-          ${renderPosterImage(item, "player-poster")}
+      <div class="player-video-shell ${heroArtworkUrl(item) ? "" : "is-fallback"}">
+        <div class="player-art ${heroArtworkUrl(item) ? "" : "is-fallback"}">
+          ${renderArtworkImage(item, "player-poster")}
         </div>
         <video id="player-video" class="player-video" preload="metadata" playsinline ${escapedPoster}>
           <source src="${escapeHtml(activeStream.url)}" />
@@ -305,6 +486,59 @@ function renderPlayer(item) {
   syncPlayerUi(item, activeStream);
 }
 
+function renderHandoffPlayer(item, stream) {
+  playerStageEl.innerHTML = `
+    <div class="player-screen">
+      <div class="player-art ${heroArtworkUrl(item) ? "" : "is-fallback"}">
+        ${renderArtworkImage(item, "player-poster")}
+      </div>
+      <div class="player-badges">
+        <span class="badge">${item.media_type}</span>
+        <span class="badge">${item.year}</span>
+        <span class="badge">${playbackKindLabel(stream)}</span>
+        <span class="badge">${stream.quality}</span>
+      </div>
+
+      <div class="player-overlay">
+        <p class="eyebrow">Player</p>
+        <h2>${item.title}</h2>
+        <p>${escapeHtml(stream.playback_note || "This source needs to open outside the embedded player.")}</p>
+        <p class="player-subtitle">${item.genres.join(" / ")} • Source: ${stream.name} • Language: ${stream.language}</p>
+      </div>
+    </div>
+  `;
+
+  playerDetailsEl.innerHTML = `
+    <article class="player-details-card">
+      <p class="eyebrow">Now selected</p>
+      <h3>${item.title}</h3>
+      <p class="meta">${item.year} • ${item.media_type} • ${item.genres.join(" / ")}</p>
+    </article>
+
+    <article class="player-details-card">
+      <p class="eyebrow">Source handling</p>
+      <div class="provider-badge-row">
+        <span class="provider-badge ${playbackKindClass(stream)}">${playbackKindLabel(stream)}</span>
+      </div>
+      <p id="stream-status-message">${lastPlaybackError || lastPlaybackNotice || stream.playback_note}</p>
+      <div class="control-buttons">
+        <button class="primary-button" id="handoff-open-source">${openSourceLabel(stream)}</button>
+        <button class="ghost-button" data-player-action="next-source">Next source</button>
+      </div>
+    </article>
+  `;
+
+  playerDetailsEl.querySelector("#handoff-open-source")?.addEventListener("click", () => {
+    void openStreamExternally(stream);
+  });
+
+  playerDetailsEl.querySelectorAll("[data-player-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      handlePlayerAction(button.dataset.playerAction, item);
+    });
+  });
+}
+
 function bindPlayerActions(item) {
   playerDetailsEl.querySelectorAll("[data-player-action]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -364,9 +598,9 @@ function renderStreams(title) {
               </div>
               <p class="stream-meta">${escapeHtml(stream.playback_note || "Source compatibility unknown.")}</p>
               <button class="stream-button ${index === selectedStreamIndex ? "is-active" : ""}" data-stream-index="${index}">
-                ${index === selectedStreamIndex ? "Selected source" : "Switch to source"}
+                ${streamSelectionLabel(stream, index === selectedStreamIndex)}
               </button>
-              <a class="stream-link" href="${stream.url}" target="_blank" rel="noreferrer">${openSourceLabel(stream)}</a>
+              <button class="ghost-button stream-link" data-open-stream-index="${index}">${openSourceLabel(stream)}</button>
             </article>
           `,
         )
@@ -391,6 +625,13 @@ function renderStreams(title) {
       }
     });
   });
+
+  streamsEl.querySelectorAll("[data-open-stream-index]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const stream = selectedStreams[Number(button.dataset.openStreamIndex)];
+      await openStreamExternally(stream);
+    });
+  });
 }
 
 function renderNoStreams(item, lookup) {
@@ -400,22 +641,22 @@ function renderNoStreams(item, lookup) {
   const acquisitionMessage = torboxSubmissionState?.message ?? "";
   const acquisitionStatus = String(torboxSubmissionState?.status ?? "").toLowerCase();
   const acquisitionPending = torboxSubmissionState?.pending ?? false;
-  const showTorboxActions = provider === "TorBox";
+  const showTorboxActions = showAutomaticSourceActions();
   const sourceSearch = sourceSearchState?.itemId === item.id
     ? sourceSearchState
     : {
         itemId: item.id,
-        provider: "Prowlarr",
+        provider: "Addons",
         status: "idle",
-        message: "Search releases to find something you can send to TorBox.",
+        message: "Sol can try to find a source automatically when you press Play.",
         releases: [],
         pending: false,
       };
 
   playerStageEl.innerHTML = `
     <div class="player-screen">
-      <div class="player-art ${item.poster_url ? "" : "is-fallback"}">
-        ${renderPosterImage(item, "player-poster")}
+      <div class="player-art ${heroArtworkUrl(item) ? "" : "is-fallback"}">
+        ${renderArtworkImage(item, "player-poster")}
       </div>
       <div class="player-badges">
         <span class="badge">${item.media_type}</span>
@@ -450,7 +691,7 @@ function renderNoStreams(item, lookup) {
         ? `
           <article class="player-details-card">
             <p class="eyebrow">Add Source</p>
-            <p class="meta">Paste a magnet link and send it to TorBox. Cached-only is enabled by default so this won’t silently start a full download.</p>
+            <p class="meta">Sol will try to find a source automatically when you press Play. You can still paste a magnet link manually if needed.</p>
             <div class="provider-badge-row">
               <span class="provider-badge ${sourceSearchBadgeClass(sourceSearch)}">${escapeHtml(sourceSearchBadgeLabel(sourceSearch))}</span>
             </div>
@@ -681,9 +922,9 @@ async function ensureSourceSearch(itemId, options = {}) {
 
   sourceSearchState = {
     itemId,
-    provider: "Prowlarr",
+    provider: "Addons",
     status: "searching",
-    message: "Searching Prowlarr for release candidates...",
+    message: "Searching addons for release candidates...",
     releases: [],
     pending: true,
   };
@@ -711,7 +952,7 @@ async function ensureSourceSearch(itemId, options = {}) {
 
     sourceSearchState = {
       itemId,
-      provider: "Prowlarr",
+      provider: "Addons",
       status: "error",
       message: String(error),
       releases: [],
@@ -728,18 +969,18 @@ async function ensureSourceSearch(itemId, options = {}) {
 function sourceSearchBadgeLabel(sourceSearch) {
   switch (sourceSearch.status) {
     case "searching":
-      return "Prowlarr searching";
+      return "Searching sources";
     case "ready":
-      return `Prowlarr connected • ${sourceSearch.releases.length} results`;
+      return `Sources ready • ${sourceSearch.releases.length} results`;
     case "no_results":
-      return "Prowlarr connected • no results";
+      return "No automatic sources";
     case "unavailable":
-      return "Prowlarr not configured";
+      return "Auto search unavailable";
     case "request_failed":
     case "error":
-      return "Prowlarr connection issue";
+      return "Source search issue";
     default:
-      return "Prowlarr idle";
+      return "Auto search idle";
   }
 }
 
@@ -827,6 +1068,94 @@ function cacheItems(items) {
   items.forEach((item) => itemCache.set(item.id, item));
 }
 
+function showAutomaticSourceActions() {
+  const torboxAddon = installedAddons.find((addon) => addon.id === "builtin.torbox");
+  return Boolean(torboxAddon?.enabled && torboxAddon?.configured);
+}
+
+async function attemptAutoPlay(item) {
+  if (autoPlayPending || selectedItemId !== item.id) {
+    return;
+  }
+
+  if (selectedStreams.length > 0) {
+    setPlaybackState(true);
+    return;
+  }
+
+  if (!showAutomaticSourceActions()) {
+    torboxSubmissionState = {
+      pending: false,
+      status: "auto_unavailable",
+      message: "Automatic playback needs TorBox configured, or another addon with a directly playable stream.",
+    };
+    renderNoStreams(item, selectedLookup);
+    return;
+  }
+
+  autoPlayPending = true;
+  torboxSubmissionState = {
+    pending: true,
+    status: "searching",
+    message: "Trying to find a playable source automatically...",
+  };
+  renderNoStreams(item, selectedLookup);
+
+  try {
+    await ensureSourceSearch(item.id, { force: true });
+    const release = sourceSearchState?.itemId === item.id ? sourceSearchState.releases?.[0] : null;
+
+    if (!release?.magnet_url) {
+      torboxSubmissionState = {
+        pending: false,
+        status: "auto_unavailable",
+        message: sourceSearchState?.message || "Sol could not find an automatic source for this title yet.",
+      };
+      renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
+      return;
+    }
+
+    torboxDraftMagnet = release.magnet_url;
+    torboxSubmissionState = {
+      pending: true,
+      status: "pending",
+      message: `Trying ${release.title}...`,
+    };
+    renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
+
+    const result = await invoke("submit_torbox_magnet", {
+      id: item.id,
+      magnet: release.magnet_url,
+      onlyIfCached: torboxCachedOnly,
+    });
+
+    torboxSubmissionState = {
+      pending: false,
+      status: result.status,
+      message: result.message,
+    };
+
+    await selectItem(item.id);
+    if (selectedStreams.length > 0) {
+      setPlaybackState(true);
+      return;
+    }
+
+    startTorboxAutoRefresh(item.id, { autoPlay: true });
+    renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
+  } catch (error) {
+    stopTorboxAutoRefresh();
+    torboxSubmissionState = {
+      pending: false,
+      status: "error",
+      message: String(error),
+    };
+    renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
+  } finally {
+    autoPlayPending = false;
+  }
+}
+
 function setPlaybackState(nextState) {
   const video = document.querySelector("#player-video");
   const item = currentItem();
@@ -842,9 +1171,14 @@ function setPlaybackState(nextState) {
   if (nextState) {
     const playbackBlockReason = getPlaybackBlockReason(stream);
     if (playbackBlockReason) {
+      if (stream?.playback_kind === "external" || stream?.playback_kind === "blocked") {
+        void openStreamExternally(stream, { fromPlayAction: true });
+        return;
+      }
       isPlaying = false;
       isPlaybackStarting = false;
       lastPlaybackError = playbackBlockReason;
+      lastPlaybackNotice = "";
       syncPlayerUi(item, stream);
       return;
     }
@@ -854,12 +1188,14 @@ function setPlaybackState(nextState) {
     if (nextState) {
       isPlaybackStarting = true;
       lastPlaybackError = "";
+      lastPlaybackNotice = "";
       armPlaybackStartWatchdog(item, stream, video);
       video.play().catch((error) => {
         isPlaying = false;
         isPlaybackStarting = false;
         clearPlaybackStartWatchdog();
         lastPlaybackError = `Playback could not start: ${error.message ?? error}`;
+        lastPlaybackNotice = "";
         syncPlayerUi(item, stream);
       });
     } else {
@@ -916,6 +1252,7 @@ function mountPlayer(item, stream) {
     isPlaybackStarting = false;
     isPlaying = true;
     lastPlaybackError = "";
+    lastPlaybackNotice = "";
     syncPlaybackFromVideo(item, stream, video);
   });
 
@@ -942,6 +1279,7 @@ function mountPlayer(item, stream) {
     isPlaybackStarting = false;
     isPlaying = false;
     lastPlaybackError = describeVideoError(video, stream);
+    lastPlaybackNotice = "";
     syncPlayerUi(item, stream);
   });
 
@@ -994,6 +1332,7 @@ function syncPlayerUi(item, stream) {
   if (streamStatusMessage) {
     streamStatusMessage.textContent =
       lastPlaybackError ||
+      lastPlaybackNotice ||
       (isPlaybackStarting ? `Trying to start playback from ${stream.name}...` : "") ||
       selectedLookup?.message ||
       `Ready to play from ${stream.name}.`;
@@ -1003,6 +1342,10 @@ function syncPlayerUi(item, stream) {
 function playbackStatusLabel() {
   if (lastPlaybackError) {
     return "Playback issue";
+  }
+
+  if (lastPlaybackNotice) {
+    return "External handoff";
   }
 
   if (isPlaybackStarting) {
@@ -1079,6 +1422,7 @@ function resetPlaybackSession() {
   playbackPercent = 0;
   pendingSeekSeconds = null;
   lastPlaybackError = "";
+  lastPlaybackNotice = "";
 }
 
 function formatPlaybackTime(item) {
@@ -1098,6 +1442,7 @@ function armPlaybackStartWatchdog(item, stream, video) {
     isPlaying = false;
     lastPlaybackError = getPlaybackBlockReason(stream)
       || "This source did not become playable in the embedded player. Try Open source URL or switch to another source.";
+    lastPlaybackNotice = "";
     syncPlayerUi(item, stream);
 
     if (!video.paused) {
@@ -1131,6 +1476,33 @@ function getPlaybackBlockReason(stream) {
   }
 
   return "";
+}
+
+async function openStreamExternally(stream, options = {}) {
+  const { fromPlayAction = false } = options;
+  const item = currentItem();
+  if (!stream?.url || !invoke) {
+    return;
+  }
+
+  try {
+    await invoke("open_external_url", { url: stream.url });
+    isPlaying = false;
+    isPlaybackStarting = false;
+    clearPlaybackStartWatchdog();
+    lastPlaybackError = "";
+    lastPlaybackNotice = fromPlayAction
+      ? `${stream.name} was opened outside the app.`
+      : `Opened ${stream.name} outside the app.`;
+    syncPlayerUi(item, stream);
+  } catch (error) {
+    isPlaying = false;
+    isPlaybackStarting = false;
+    clearPlaybackStartWatchdog();
+    lastPlaybackError = `Could not open this source externally: ${error.message ?? error}`;
+    lastPlaybackNotice = "";
+    syncPlayerUi(item, stream);
+  }
 }
 
 function describeVideoError(video, stream) {
@@ -1208,6 +1580,19 @@ function renderPosterImage(item, className) {
   return `<img class="${className}" src="${item.poster_url}" alt="${escapeHtml(item.title)} poster" loading="lazy" />`;
 }
 
+function renderArtworkImage(item, className) {
+  const artworkUrl = heroArtworkUrl(item);
+  if (!artworkUrl) {
+    return "";
+  }
+
+  return `<img class="${className}" src="${artworkUrl}" alt="${escapeHtml(item.title)} artwork" loading="lazy" />`;
+}
+
+function heroArtworkUrl(item) {
+  return item?.backdrop_url || item?.poster_url || "";
+}
+
 function playbackKindLabel(stream) {
   switch (stream?.playback_kind) {
     case "embedded":
@@ -1236,6 +1621,60 @@ function playbackKindClass(stream) {
 
 function openSourceLabel(stream) {
   return stream?.playback_kind === "embedded" ? "Open source URL" : "Open externally";
+}
+
+function streamSelectionLabel(stream, isSelected) {
+  if (stream?.playback_kind === "external") {
+    return isSelected ? "Selected external source" : "Select external source";
+  }
+
+  if (stream?.playback_kind === "blocked") {
+    return isSelected ? "Selected blocked source" : "Select blocked source";
+  }
+
+  return isSelected ? "Selected source" : "Switch to source";
+}
+
+function addonSettingsHint(addon) {
+  if (addon.transport === "remote") {
+    return "Remote addons can be reordered, disabled, or removed here.";
+  }
+
+  if (addon.source.startsWith("env:")) {
+    return `This built-in addon is configured through ${addon.source.replace("env:", "")}.`;
+  }
+
+  return "This built-in addon ships with Sol.";
+}
+
+function addonHealthLabel(addon) {
+  switch (addon.health_status) {
+    case "healthy":
+      return "Healthy";
+    case "setup_required":
+      return "Needs setup";
+    case "disabled":
+      return "Disabled";
+    case "error":
+      return "Check addon";
+    default:
+      return "Unknown health";
+  }
+}
+
+function addonHealthClass(addon) {
+  switch (addon.health_status) {
+    case "healthy":
+      return "is-success";
+    case "setup_required":
+      return "is-pending";
+    case "disabled":
+      return "is-neutral";
+    case "error":
+      return "is-error";
+    default:
+      return "is-neutral";
+  }
 }
 
 function escapeHtml(value) {

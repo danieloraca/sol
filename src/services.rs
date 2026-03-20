@@ -1,7 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use crate::{
-    addons::{AddonRegistry, AddonStore, RemoteHttpAddon, SolAddon},
+    addons::{AddonRegistry, AddonStore, MoveDirection, RemoteHttpAddon, SolAddon},
     domain::{
         AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, MediaType, SourceSearchResult,
         StreamLookup, StreamSource,
@@ -17,7 +17,7 @@ pub struct AppServices {
 impl AppServices {
     pub fn demo() -> Self {
         let store = AddonStore::default();
-        let registry = AddonRegistry::from_manifest_urls(&store.load_urls());
+        let registry = AddonRegistry::from_manifest_urls(&store.enabled_urls());
 
         Self {
             addons: Arc::new(RwLock::new(registry)),
@@ -75,21 +75,95 @@ impl AppServices {
     }
 
     pub fn addons(&self) -> Vec<AddonDescriptor> {
-        self.addons
+        let registry_descriptors = self
+            .addons
             .read()
             .expect("addon registry read lock")
-            .descriptors()
+            .descriptors();
+        let mut descriptors = registry_descriptors
+            .iter()
+            .filter(|addon| matches!(addon.transport, crate::domain::AddonTransport::Remote))
+            .map(|addon| (addon.source.clone(), addon.clone()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+
+        let mut ordered = self
+            .store
+            .remote_addons()
+            .into_iter()
+            .map(|stored| {
+                descriptors.remove(&stored.manifest_url).unwrap_or(AddonDescriptor {
+                    id: if stored.id.is_empty() {
+                        stored.manifest_url.clone()
+                    } else {
+                        stored.id.clone()
+                    },
+                    name: if stored.name.is_empty() {
+                        "Remote addon".into()
+                    } else {
+                        stored.name.clone()
+                    },
+                    version: stored.version.clone(),
+                    transport: crate::domain::AddonTransport::Remote,
+                    enabled: stored.enabled,
+                    configured: true,
+                    health_status: if stored.enabled {
+                        "error".into()
+                    } else {
+                        "disabled".into()
+                    },
+                    health_message: if stored.enabled {
+                        "Sol could not load this addon manifest right now.".into()
+                    } else {
+                        "This addon is disabled in Sol.".into()
+                    },
+                    capabilities: stored.capabilities.clone(),
+                    source: stored.manifest_url.clone(),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        ordered.extend(
+            registry_descriptors
+                .into_iter()
+                .filter(|addon| matches!(addon.transport, crate::domain::AddonTransport::Builtin)),
+        );
+        ordered
     }
 
     pub fn install_addon_url(&self, manifest_url: &str) -> Result<AddonDescriptor, String> {
         let addon = RemoteHttpAddon::install(manifest_url)?;
-        self.store.install_url(manifest_url)?;
-        let urls = self.store.load_urls();
         let descriptor = addon.descriptor();
-
-        *self.addons.write().expect("addon registry write lock") =
-            AddonRegistry::from_manifest_urls(&urls);
+        self.store.install_remote_addon(manifest_url, &descriptor)?;
+        self.reload_registry();
 
         Ok(descriptor)
+    }
+
+    pub fn set_remote_addon_enabled(
+        &self,
+        manifest_url: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        self.store.set_remote_enabled(manifest_url, enabled)?;
+        self.reload_registry();
+        Ok(())
+    }
+
+    pub fn remove_remote_addon(&self, manifest_url: &str) -> Result<(), String> {
+        self.store.remove_remote_addon(manifest_url)?;
+        self.reload_registry();
+        Ok(())
+    }
+
+    pub fn move_remote_addon(&self, manifest_url: &str, direction: MoveDirection) -> Result<(), String> {
+        self.store.move_remote_addon(manifest_url, direction)?;
+        self.reload_registry();
+        Ok(())
+    }
+
+    fn reload_registry(&self) {
+        let urls = self.store.enabled_urls();
+        *self.addons.write().expect("addon registry write lock") =
+            AddonRegistry::from_manifest_urls(&urls);
     }
 }
