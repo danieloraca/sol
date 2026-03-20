@@ -1139,6 +1139,7 @@ fn top_torrent_candidates(item: &MediaItem, torrents: &[TorboxTorrent]) -> Vec<S
                 torrent.files.len(),
                 if torrent.files.len() == 1 { "" } else { "s" }
             ),
+            magnet_url: None,
         })
         .collect()
 }

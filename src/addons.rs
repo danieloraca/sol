@@ -1,9 +1,4 @@
-use std::{
-    collections::BTreeSet,
-    fs,
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{collections::BTreeSet, fs, path::PathBuf, sync::Arc};
 
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -11,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     domain::{
         AcquisitionResult, AddonDescriptor, AddonTransport, HomeFeed, MediaItem, MediaType,
-        SourceRelease, SourceSearchResult, StreamLookup, StreamSource,
+        SourceRelease, SourceSearchResult, StreamCandidate, StreamLookup, StreamSource,
     },
     providers::{
         MetadataProvider, ProwlarrSourceProvider, SeededLibraryProvider, SourceSearchProvider,
@@ -130,20 +125,20 @@ impl AddonRegistry {
     pub fn catalog(&self, media_type: Option<MediaType>) -> Vec<MediaItem> {
         dedupe_media_items(
             self.addons
-            .iter()
-            .filter_map(|addon| addon.catalog(media_type.clone()))
-            .flatten()
-            .collect(),
+                .iter()
+                .filter_map(|addon| addon.catalog(media_type.clone()))
+                .flatten()
+                .collect(),
         )
     }
 
     pub fn search(&self, query: &str) -> Vec<MediaItem> {
         dedupe_media_items(
             self.addons
-            .iter()
-            .filter_map(|addon| addon.search(query))
-            .flatten()
-            .collect(),
+                .iter()
+                .filter_map(|addon| addon.search(query))
+                .flatten()
+                .collect(),
         )
     }
 
@@ -178,9 +173,15 @@ impl AddonRegistry {
                 .into_iter()
                 .collect::<Vec<_>>();
 
-            let status = if streams.iter().any(|stream| stream.playback_kind == "embedded") {
+            let status = if streams
+                .iter()
+                .any(|stream| stream.playback_kind == "embedded")
+            {
                 "ready"
-            } else if streams.iter().any(|stream| stream.playback_kind == "external") {
+            } else if streams
+                .iter()
+                .any(|stream| stream.playback_kind == "external")
+            {
                 "external_only"
             } else {
                 "blocked_only"
@@ -255,12 +256,15 @@ impl AddonRegistry {
             };
         }
 
-        results.into_iter().next().unwrap_or_else(|| SourceSearchResult {
-            provider: "Addons".into(),
-            status: "unavailable".into(),
-            message: "No source-search addon is configured.".into(),
-            releases: vec![],
-        })
+        results
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| SourceSearchResult {
+                provider: "Addons".into(),
+                status: "unavailable".into(),
+                message: "No source-search addon is configured.".into(),
+                releases: vec![],
+            })
     }
 
     pub fn submit_magnet(
@@ -382,7 +386,11 @@ impl AddonStore {
         self.save_settings(&settings)
     }
 
-    pub fn move_remote_addon(&self, manifest_url: &str, direction: MoveDirection) -> Result<(), String> {
+    pub fn move_remote_addon(
+        &self,
+        manifest_url: &str,
+        direction: MoveDirection,
+    ) -> Result<(), String> {
         let mut settings = self.load_settings();
         let Some(index) = settings
             .remote_addons
@@ -405,7 +413,8 @@ impl AddonStore {
     fn save_settings(&self, settings: &StoredAddonSettings) -> Result<(), String> {
         let raw = serde_json::to_string_pretty(settings)
             .map_err(|error| format!("Could not serialize addon settings: {error}"))?;
-        fs::write(&self.path, raw).map_err(|error| format!("Could not save addon settings: {error}"))
+        fs::write(&self.path, raw)
+            .map_err(|error| format!("Could not save addon settings: {error}"))
     }
 }
 
@@ -568,11 +577,15 @@ impl SolAddon for TmdbMetadataAddon {
     }
 
     fn search(&self, query: &str) -> Option<Vec<MediaItem>> {
-        self.provider.as_ref().map(|provider| provider.search(query))
+        self.provider
+            .as_ref()
+            .map(|provider| provider.search(query))
     }
 
     fn item(&self, id: &str) -> Option<MediaItem> {
-        self.provider.as_ref().and_then(|provider| provider.item(id))
+        self.provider
+            .as_ref()
+            .and_then(|provider| provider.item(id))
     }
 }
 
@@ -675,7 +688,11 @@ impl RemoteHttpAddon {
         }
 
         let client = Client::builder()
-            .user_agent(format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")))
+            .user_agent(format!(
+                "{}/{}",
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION")
+            ))
             .build()
             .map_err(|error| format!("Could not build addon client: {error}"))?;
 
@@ -696,24 +713,38 @@ impl RemoteHttpAddon {
         })
     }
 
-    fn supports_resource(&self, name: &str, media_type: Option<MediaType>, id: Option<&str>) -> bool {
-        self.manifest.resources.iter().any(|resource| match resource {
-            RemoteResourceEntry::Name(resource_name) => resource_name_matches(resource_name, name),
-            RemoteResourceEntry::Object(resource_obj) => {
-                resource_name_matches(&resource_obj.name, name)
-                    && media_type
-                        .as_ref()
-                        .is_none_or(|expected| resource_obj.supports_type(expected))
-                    && id.is_none_or(|value| resource_obj.supports_id(value))
-            }
-        })
+    fn supports_resource(
+        &self,
+        name: &str,
+        media_type: Option<MediaType>,
+        id: Option<&str>,
+    ) -> bool {
+        self.manifest
+            .resources
+            .iter()
+            .any(|resource| match resource {
+                RemoteResourceEntry::Name(resource_name) => {
+                    resource_name_matches(resource_name, name)
+                }
+                RemoteResourceEntry::Object(resource_obj) => {
+                    resource_name_matches(&resource_obj.name, name)
+                        && media_type
+                            .as_ref()
+                            .is_none_or(|expected| resource_obj.supports_type(expected))
+                        && id.is_none_or(|value| resource_obj.supports_id(value))
+                }
+            })
     }
 
     fn catalogs_for(&self, media_type: Option<MediaType>, search: bool) -> Vec<&RemoteCatalog> {
         self.manifest
             .catalogs
             .iter()
-            .filter(|catalog| media_type.as_ref().is_none_or(|expected| catalog.matches_type(expected)))
+            .filter(|catalog| {
+                media_type
+                    .as_ref()
+                    .is_none_or(|expected| catalog.matches_type(expected))
+            })
             .filter(|catalog| {
                 if search {
                     catalog.supports_extra("search")
@@ -870,6 +901,7 @@ impl SolAddon for RemoteHttpAddon {
         let response = self.stream_response(item)?;
         let streams = response
             .streams
+            .clone()
             .into_iter()
             .filter_map(map_remote_stream_source)
             .map(|mut stream| {
@@ -877,21 +909,45 @@ impl SolAddon for RemoteHttpAddon {
                 stream
             })
             .collect::<Vec<_>>();
+        let candidates = response
+            .streams
+            .into_iter()
+            .filter_map(map_remote_stream_source_release)
+            .map(|release| StreamCandidate {
+                name: release.title.clone(),
+                detail: format!(
+                    "{} • {} • {} • {}",
+                    release.indexer, release.quality, release.size, release.seeders
+                ),
+                magnet_url: Some(release.magnet_url),
+            })
+            .collect::<Vec<_>>();
 
         Some(StreamLookup {
             provider: self.manifest.name.clone(),
-            status: if streams.is_empty() {
-                "no_direct_streams".into()
-            } else {
+            status: if !streams.is_empty() {
                 "ready".into()
-            },
-            message: if streams.is_empty() {
-                format!("{} did not return any directly playable stream URLs.", self.manifest.name)
+            } else if !candidates.is_empty() {
+                "source_candidates".into()
             } else {
+                "no_direct_streams".into()
+            },
+            message: if !streams.is_empty() {
                 format!("Streaming from addon {}.", self.manifest.name)
+            } else if !candidates.is_empty() {
+                format!(
+                    "{} returned {} source candidate(s) for automatic playback.",
+                    self.manifest.name,
+                    candidates.len()
+                )
+            } else {
+                format!(
+                    "{} did not return any directly playable stream URLs.",
+                    self.manifest.name
+                )
             },
             streams,
-            candidates: vec![],
+            candidates,
         })
     }
 
@@ -905,9 +961,16 @@ impl SolAddon for RemoteHttpAddon {
                 "ready".into()
             },
             message: if releases.is_empty() {
-                format!("{} did not return any addable stream sources for {}.", self.manifest.name, item.title)
+                format!(
+                    "{} did not return any addable stream sources for {}.",
+                    self.manifest.name, item.title
+                )
             } else {
-                format!("{} returned {} source candidates.", self.manifest.name, releases.len())
+                format!(
+                    "{} returned {} source candidates.",
+                    self.manifest.name,
+                    releases.len()
+                )
             },
             releases,
         })
@@ -964,7 +1027,11 @@ struct RemoteResourceObject {
 
 impl RemoteResourceObject {
     fn supports_type(&self, media_type: &MediaType) -> bool {
-        self.types.is_empty() || self.types.iter().any(|value| value == media_type_to_remote(media_type))
+        self.types.is_empty()
+            || self
+                .types
+                .iter()
+                .any(|value| value == media_type_to_remote(media_type))
     }
 
     fn supports_id(&self, id: &str) -> bool {
@@ -987,7 +1054,8 @@ fn select_supported_resource_id(
             )
         })
         .or_else(|| {
-            addon.supports_resource(resource_name, Some(item.media_type.clone()), Some(&item.id))
+            addon
+                .supports_resource(resource_name, Some(item.media_type.clone()), Some(&item.id))
                 .then(|| item.id.clone())
         })
 }
@@ -1099,19 +1167,14 @@ fn unavailable_placeholder() -> MediaItem {
 
 fn dedupe_media_items(items: Vec<MediaItem>) -> Vec<MediaItem> {
     let mut seen = BTreeSet::new();
-    items.into_iter()
+    items
+        .into_iter()
         .filter(|item| seen.insert(item.id.clone()))
         .collect()
 }
 
 fn dedupe_stream_sources(mut streams: Vec<StreamSource>) -> Vec<StreamSource> {
-    streams.sort_by_key(|stream| {
-        (
-            playback_rank(&stream.playback_kind),
-            stream.name.clone(),
-            stream.url.clone(),
-        )
-    });
+    streams.sort_by_key(|stream| playback_rank(&stream.playback_kind));
 
     let mut seen = BTreeSet::new();
     streams
@@ -1180,7 +1243,9 @@ fn map_remote_meta_preview(meta: RemoteMetaPreview) -> Option<MediaItem> {
         id: meta.id,
         alternate_ids: vec![],
         title: meta.title,
-        description: meta.description.unwrap_or_else(|| "No description provided by addon.".into()),
+        description: meta
+            .description
+            .unwrap_or_else(|| "No description provided by addon.".into()),
         media_type: parse_remote_media_type(meta.media_type.as_deref())?,
         genres: meta.genres.unwrap_or_default(),
         poster_url,
@@ -1216,7 +1281,10 @@ fn map_remote_stream_source(stream: RemoteStream) -> Option<StreamSource> {
         (None, None) => return None,
     };
     Some(StreamSource {
-        name: stream.name.or(stream.title).unwrap_or_else(|| "Remote stream".into()),
+        name: stream
+            .name
+            .or(stream.title)
+            .unwrap_or_else(|| "Remote stream".into()),
         quality: infer_quality_from_text(&url),
         language: "unknown".into(),
         url,
@@ -1235,7 +1303,11 @@ fn map_remote_stream_source_release(stream: RemoteStream) -> Option<SourceReleas
         .info_hash
         .map(|hash| format!("magnet:?xt=urn:btih:{hash}"))
         .or_else(|| stream.url.filter(|value| value.starts_with("magnet:?")))
-        .or_else(|| stream.external_url.filter(|value| value.starts_with("magnet:?")))?;
+        .or_else(|| {
+            stream
+                .external_url
+                .filter(|value| value.starts_with("magnet:?"))
+        })?;
 
     Some(SourceRelease {
         title: title.clone(),
@@ -1255,7 +1327,10 @@ fn map_remote_stream_source_release(stream: RemoteStream) -> Option<SourceReleas
 
 fn parse_release_year(value: Option<&str>) -> u16 {
     value
-        .and_then(|raw| raw.split(|ch: char| !ch.is_ascii_digit()).find(|part| part.len() == 4))
+        .and_then(|raw| {
+            raw.split(|ch: char| !ch.is_ascii_digit())
+                .find(|part| part.len() == 4)
+        })
         .and_then(|year| year.parse::<u16>().ok())
         .unwrap_or(0)
 }
@@ -1315,9 +1390,10 @@ mod tests {
 
     use super::{
         AddonRegistry, RemoteHttpAddon, RemoteManifest, RemoteResourceEntry, RemoteResourceObject,
+        RemoteStream, dedupe_stream_sources, map_remote_stream_source_release,
         media_id_candidates, select_supported_resource_id,
     };
-    use crate::domain::{MediaItem, MediaType};
+    use crate::domain::{MediaItem, MediaType, StreamSource};
 
     #[test]
     fn builtin_registry_contains_demo_addon() {
@@ -1346,7 +1422,10 @@ mod tests {
 
         let ids = media_id_candidates(&item);
 
-        assert_eq!(ids, vec!["tmdb:movie:123".to_string(), "tt1234567".to_string()]);
+        assert_eq!(
+            ids,
+            vec!["tmdb:movie:123".to_string(), "tt1234567".to_string()]
+        );
     }
 
     #[test]
@@ -1384,5 +1463,44 @@ mod tests {
         let id = select_supported_resource_id(&addon, "stream", &item);
 
         assert_eq!(id.as_deref(), Some("tt1234567"));
+    }
+
+    #[test]
+    fn dedupe_stream_sources_prefers_embedded_over_blocked() {
+        let streams = dedupe_stream_sources(vec![
+            StreamSource {
+                name: "Blocked".into(),
+                quality: "1080p".into(),
+                language: "en".into(),
+                url: "https://example.com/video.m3u8".into(),
+                playback_kind: "blocked".into(),
+                playback_note: String::new(),
+            },
+            StreamSource {
+                name: "Embedded".into(),
+                quality: "1080p".into(),
+                language: "en".into(),
+                url: "https://example.com/video.m3u8".into(),
+                playback_kind: "embedded".into(),
+                playback_note: String::new(),
+            },
+        ]);
+
+        assert_eq!(streams.len(), 1);
+        assert_eq!(streams[0].playback_kind, "embedded");
+    }
+
+    #[test]
+    fn map_remote_stream_source_release_accepts_info_hash() {
+        let release = map_remote_stream_source_release(RemoteStream {
+            name: Some("Release".into()),
+            title: Some("Release".into()),
+            url: None,
+            external_url: None,
+            info_hash: Some("ABC123".into()),
+        })
+        .expect("info hash should produce a source release");
+
+        assert_eq!(release.magnet_url, "magnet:?xt=urn:btih:ABC123");
     }
 }

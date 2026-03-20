@@ -43,6 +43,7 @@ let sourceSearchState = null;
 let installedAddons = [];
 let selectedAddonSource = null;
 let autoPlayPending = false;
+let manualSourceToolsVisible = false;
 
 async function bootstrap() {
   if (!invoke) {
@@ -358,6 +359,7 @@ async function selectItem(id, options = {}) {
       torboxDraftMagnet = "";
       torboxCachedOnly = true;
       sourceSearchState = null;
+      manualSourceToolsVisible = false;
     }
     resetPlaybackSession();
     selectedItemId = id;
@@ -641,7 +643,8 @@ function renderNoStreams(item, lookup) {
   const acquisitionMessage = torboxSubmissionState?.message ?? "";
   const acquisitionStatus = String(torboxSubmissionState?.status ?? "").toLowerCase();
   const acquisitionPending = torboxSubmissionState?.pending ?? false;
-  const showTorboxActions = showAutomaticSourceActions();
+  const showAutoPlayTools = showAutomaticSourceActions();
+  const showTorboxActions = showAutoPlayTools && manualSourceToolsVisible;
   const sourceSearch = sourceSearchState?.itemId === item.id
     ? sourceSearchState
     : {
@@ -669,7 +672,7 @@ function renderNoStreams(item, lookup) {
         <p class="eyebrow">Player</p>
         <h2>${item.title}</h2>
         <p>${message}</p>
-        <p class="player-subtitle">Metadata is loaded, but playback needs a matching TorBox item in your library.</p>
+        <p class="player-subtitle">Sol will try addon streams first, then automatic source acquisition if it can.</p>
       </div>
     </div>
   `;
@@ -687,14 +690,38 @@ function renderNoStreams(item, lookup) {
     </article>
 
     ${
-      showTorboxActions
+      showAutoPlayTools
         ? `
           <article class="player-details-card">
-            <p class="eyebrow">Add Source</p>
-            <p class="meta">Sol will try to find a source automatically when you press Play. You can still paste a magnet link manually if needed.</p>
+            <p class="eyebrow">Autoplay</p>
+            <p class="meta">Press Play and Sol will try direct streams first, then automatic source search and TorBox handoff.</p>
             <div class="provider-badge-row">
               <span class="provider-badge ${sourceSearchBadgeClass(sourceSearch)}">${escapeHtml(sourceSearchBadgeLabel(sourceSearch))}</span>
             </div>
+            <div class="control-buttons">
+              <button class="primary-button" id="autoplay-source" ${acquisitionPending || autoPlayPending ? "disabled" : ""}>
+                ${acquisitionPending || autoPlayPending ? "Trying..." : "Try autoplay"}
+              </button>
+              <button class="ghost-button" id="toggle-manual-source-tools">
+                ${showTorboxActions ? "Hide manual tools" : "Show manual tools"}
+              </button>
+            </div>
+            ${
+              acquisitionMessage
+                ? `<p class="submit-feedback ${escapeHtml(acquisitionStatus)}">${escapeHtml(acquisitionMessage)}</p>`
+                : ""
+            }
+          </article>
+        `
+        : ""
+    }
+
+    ${
+      showTorboxActions
+        ? `
+          <article class="player-details-card">
+            <p class="eyebrow">Manual Source</p>
+            <p class="meta">Use this only if autoplay could not find something usable.</p>
             <label class="torbox-form">
               <span class="sr-only">Magnet link</span>
               <textarea id="torbox-magnet" placeholder="magnet:?xt=urn:btih:...">${escapeHtml(torboxDraftMagnet)}</textarea>
@@ -709,11 +736,6 @@ function renderNoStreams(item, lookup) {
               </button>
               <button class="ghost-button" id="torbox-refresh-lookup">Refresh lookup</button>
             </div>
-            ${
-              acquisitionMessage
-                ? `<p class="submit-feedback ${escapeHtml(acquisitionStatus)}">${escapeHtml(acquisitionMessage)}</p>`
-                : ""
-            }
           </article>
         `
         : ""
@@ -787,6 +809,18 @@ function renderNoStreams(item, lookup) {
 }
 
 function bindNoStreamActions(item, showTorboxActions) {
+  const autoplayButton = document.querySelector("#autoplay-source");
+  const toggleManualButton = document.querySelector("#toggle-manual-source-tools");
+
+  autoplayButton?.addEventListener("click", async () => {
+    await attemptAutoPlay(item, { force: true });
+  });
+
+  toggleManualButton?.addEventListener("click", () => {
+    manualSourceToolsVisible = !manualSourceToolsVisible;
+    renderNoStreams(item, selectedLookup);
+  });
+
   if (!showTorboxActions) {
     return;
   }
@@ -1073,12 +1107,13 @@ function showAutomaticSourceActions() {
   return Boolean(torboxAddon?.enabled && torboxAddon?.configured);
 }
 
-async function attemptAutoPlay(item) {
+async function attemptAutoPlay(item, options = {}) {
+  const { force = false } = options;
   if (autoPlayPending || selectedItemId !== item.id) {
     return;
   }
 
-  if (selectedStreams.length > 0) {
+  if (!force && selectedStreams.length > 0) {
     setPlaybackState(true);
     return;
   }
@@ -1102,8 +1137,13 @@ async function attemptAutoPlay(item) {
   renderNoStreams(item, selectedLookup);
 
   try {
-    await ensureSourceSearch(item.id, { force: true });
-    const release = sourceSearchState?.itemId === item.id ? sourceSearchState.releases?.[0] : null;
+    const lookupCandidates = (selectedLookup?.candidates ?? []).filter((candidate) => candidate.magnet_url);
+    let release = lookupCandidates[0] ?? null;
+
+    if (!release) {
+      await ensureSourceSearch(item.id, { force: true });
+      release = sourceSearchState?.itemId === item.id ? sourceSearchState.releases?.[0] : null;
+    }
 
     if (!release?.magnet_url) {
       torboxSubmissionState = {
@@ -1111,6 +1151,7 @@ async function attemptAutoPlay(item) {
         status: "auto_unavailable",
         message: sourceSearchState?.message || "Sol could not find an automatic source for this title yet.",
       };
+      manualSourceToolsVisible = true;
       renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
       return;
     }
@@ -1150,6 +1191,7 @@ async function attemptAutoPlay(item) {
       status: "error",
       message: String(error),
     };
+    manualSourceToolsVisible = true;
     renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
   } finally {
     autoPlayPending = false;

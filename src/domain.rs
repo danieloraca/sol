@@ -22,6 +22,8 @@ pub struct StreamSource {
 pub struct StreamCandidate {
     pub name: String,
     pub detail: String,
+    #[serde(default)]
+    pub magnet_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
