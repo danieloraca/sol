@@ -10,7 +10,13 @@ pub enum MediaType {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StreamSource {
+    #[serde(default)]
+    pub provider: String,
     pub name: String,
+    #[serde(default)]
+    pub full_title: String,
+    #[serde(default)]
+    pub details: Vec<String>,
     pub quality: String,
     pub language: String,
     pub url: String,

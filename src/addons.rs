@@ -909,6 +909,7 @@ impl SolAddon for RemoteHttpAddon {
             .into_iter()
             .filter_map(map_remote_stream_source)
             .map(|mut stream| {
+                stream.provider = self.manifest.name.clone();
                 stream.name = format!("{} • {}", self.manifest.name, stream.name);
                 stream
             })
@@ -1265,6 +1266,15 @@ fn map_remote_meta_value(value: serde_json::Value) -> Option<MediaItem> {
 }
 
 fn map_remote_stream_source(stream: RemoteStream) -> Option<StreamSource> {
+    let display_name = stream
+        .name
+        .clone()
+        .or(stream.title.clone())
+        .unwrap_or_else(|| "Remote stream".into());
+    let full_title = stream
+        .title
+        .clone()
+        .unwrap_or_else(|| display_name.clone());
     let (url, playback_kind, playback_note) = match (stream.url, stream.external_url) {
         (Some(url), _) if url.starts_with("http://") => (
             url,
@@ -1285,16 +1295,25 @@ fn map_remote_stream_source(stream: RemoteStream) -> Option<StreamSource> {
         (None, None) => return None,
     };
     Some(StreamSource {
-        name: stream
-            .name
-            .or(stream.title)
-            .unwrap_or_else(|| "Remote stream".into()),
+        provider: String::new(),
+        name: display_name,
+        full_title: full_title.clone(),
+        details: remote_stream_details(&full_title),
         quality: infer_quality_from_text(&url),
         language: "unknown".into(),
         url,
         playback_kind,
         playback_note,
     })
+}
+
+fn remote_stream_details(value: &str) -> Vec<String> {
+    value
+        .lines()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .map(|line| line.trim_start_matches('▶').trim().to_string())
+        .collect()
 }
 
 fn map_remote_stream_source_release(stream: RemoteStream) -> Option<SourceRelease> {
@@ -1489,7 +1508,10 @@ mod tests {
     fn dedupe_stream_sources_prefers_embedded_over_blocked() {
         let streams = dedupe_stream_sources(vec![
             StreamSource {
+                provider: "Test".into(),
                 name: "Blocked".into(),
+                full_title: "Blocked".into(),
+                details: vec![],
                 quality: "1080p".into(),
                 language: "en".into(),
                 url: "https://example.com/video.m3u8".into(),
@@ -1497,7 +1519,10 @@ mod tests {
                 playback_note: String::new(),
             },
             StreamSource {
+                provider: "Test".into(),
                 name: "Embedded".into(),
+                full_title: "Embedded".into(),
+                details: vec![],
                 quality: "1080p".into(),
                 language: "en".into(),
                 url: "https://example.com/video.m3u8".into(),

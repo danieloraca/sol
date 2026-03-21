@@ -743,7 +743,10 @@ impl StreamProvider for TorboxStreamProvider {
             status: "ready".into(),
             message: format!("Streaming from TorBox item \"{}\".", torrent.name),
             streams: vec![StreamSource {
+                provider: "TorBox".into(),
                 name: format!("TorBox • {}", file.short_name.as_deref().unwrap_or(&file.name)),
+                full_title: torrent.name.clone(),
+                details: torbox_stream_details(&stream.metadata, file, torrent),
                 quality,
                 language,
                 url: stream.hls_url,
@@ -1024,12 +1027,80 @@ struct TorboxStreamMetadata {
 struct TorboxVideoMetadata {
     width: Option<u32>,
     height: Option<u32>,
+    codec: Option<String>,
+    bitrate: Option<u64>,
 }
 
 #[derive(Deserialize)]
 struct TorboxAudioMetadata {
     language: Option<String>,
     language_full: Option<String>,
+    codec: Option<String>,
+    channels: Option<String>,
+}
+
+fn torbox_stream_details(
+    metadata: &TorboxStreamMetadata,
+    file: &TorboxTorrentFile,
+    torrent: &TorboxTorrent,
+) -> Vec<String> {
+    let mut details = Vec::new();
+
+    if let Some(codec) = metadata.video.as_ref().and_then(|video| video.codec.clone()) {
+        details.push(format!("Video: {codec}"));
+    }
+
+    if let Some(audio) = metadata.audios.first() {
+        let mut parts = Vec::new();
+        if let Some(codec) = audio.codec.clone() {
+            parts.push(codec);
+        }
+        if let Some(channels) = audio.channels.clone() {
+            parts.push(channels);
+        }
+        if let Some(language) = audio
+            .language_full
+            .clone()
+            .or_else(|| audio.language.clone())
+        {
+            parts.push(language);
+        }
+        if !parts.is_empty() {
+            details.push(format!("Audio: {}", parts.join(" • ")));
+        }
+    }
+
+    if let Some(bitrate) = metadata.video.as_ref().and_then(|video| video.bitrate) {
+        details.push(format!("Bitrate: {}", format_bits_per_second(bitrate)));
+    }
+
+    details.push(format!("Size: {}", format_stream_bytes(file.size)));
+    details.push(format!("Library: {}", torrent.name));
+
+    details
+}
+
+fn format_stream_bytes(bytes: u64) -> String {
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    const MIB: f64 = 1024.0 * 1024.0;
+
+    if bytes as f64 >= GIB {
+        format!("{:.2} GB", bytes as f64 / GIB)
+    } else {
+        format!("{:.1} MB", bytes as f64 / MIB)
+    }
+}
+
+fn format_bits_per_second(bits_per_second: u64) -> String {
+    if bits_per_second >= 1_000_000_000 {
+        format!("{:.1} Gbps", bits_per_second as f64 / 1_000_000_000.0)
+    } else if bits_per_second >= 1_000_000 {
+        format!("{:.1} Mbps", bits_per_second as f64 / 1_000_000.0)
+    } else if bits_per_second >= 1_000 {
+        format!("{:.1} Kbps", bits_per_second as f64 / 1_000.0)
+    } else {
+        format!("{bits_per_second} bps")
+    }
 }
 
 fn bearer_header(token: &str) -> Option<HeaderValue> {
@@ -1269,7 +1340,10 @@ fn seed_catalog() -> Vec<MediaItem> {
             year: 2026,
             streams: vec![
                 StreamSource {
+                    provider: "Demo".into(),
                     name: "Primary CDN".into(),
+                    full_title: "Primary CDN".into(),
+                    details: vec!["Bundled demo source".into()],
                     quality: "4K".into(),
                     language: "en".into(),
                     url: "https://stream.example.com/solstice-run/4k".into(),
@@ -1277,7 +1351,10 @@ fn seed_catalog() -> Vec<MediaItem> {
                     playback_note: "Playable in the in-app player.".into(),
                 },
                 StreamSource {
+                    provider: "Demo".into(),
                     name: "Fallback Edge".into(),
+                    full_title: "Fallback Edge".into(),
+                    details: vec!["Bundled demo source".into()],
                     quality: "1080p".into(),
                     language: "en".into(),
                     url: "https://stream.example.com/solstice-run/1080p".into(),
@@ -1297,7 +1374,10 @@ fn seed_catalog() -> Vec<MediaItem> {
             backdrop_url: "https://images.example.com/night-shift-atlas-hero.jpg".into(),
             year: 2025,
             streams: vec![StreamSource {
+                provider: "Demo".into(),
                 name: "Season 1".into(),
+                full_title: "Season 1".into(),
+                details: vec!["Bundled demo source".into()],
                 quality: "1080p".into(),
                 language: "en".into(),
                 url: "https://stream.example.com/night-shift-atlas/s1".into(),
@@ -1316,7 +1396,10 @@ fn seed_catalog() -> Vec<MediaItem> {
             backdrop_url: "https://images.example.com/lofi-cosmos-hero.jpg".into(),
             year: 2026,
             streams: vec![StreamSource {
+                provider: "Demo".into(),
                 name: "Live".into(),
+                full_title: "Live".into(),
+                details: vec!["Bundled demo source".into()],
                 quality: "720p".into(),
                 language: "instrumental".into(),
                 url: "https://stream.example.com/lofi-cosmos/live".into(),
@@ -1335,7 +1418,10 @@ fn seed_catalog() -> Vec<MediaItem> {
             backdrop_url: "https://images.example.com/quiet-voltage-hero.jpg".into(),
             year: 2024,
             streams: vec![StreamSource {
+                provider: "Demo".into(),
                 name: "Theatrical".into(),
+                full_title: "Theatrical".into(),
+                details: vec!["Bundled demo source".into()],
                 quality: "1080p".into(),
                 language: "en".into(),
                 url: "https://stream.example.com/quiet-voltage/main".into(),

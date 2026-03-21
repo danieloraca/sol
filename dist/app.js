@@ -25,6 +25,7 @@ let selectedItemId = null;
 let selectedStreams = [];
 let selectedLookup = null;
 let selectedStreamIndex = 0;
+let selectedStreamProviderFilter = "all";
 let playbackPercent = 0;
 let isPlaying = false;
 let isPlaybackStarting = false;
@@ -369,6 +370,7 @@ async function selectItem(id, options = {}) {
     selectedLookup = await invoke("get_stream_lookup", { id });
     selectedStreams = selectedLookup.streams ?? [];
     selectedStreamIndex = 0;
+    selectedStreamProviderFilter = "all";
     playbackPercent = 0;
     playbackCurrentSeconds = 0;
     playbackDurationSeconds = estimateRuntimeSeconds(item);
@@ -586,32 +588,119 @@ function renderStreams(title) {
   }
 
   const activeSource = selectedStreams[selectedStreamIndex];
+  const lookupCandidates = (selectedLookup?.candidates ?? []).filter((candidate) => candidate?.magnet_url);
+  const canSubmitCandidates = showAutomaticSourceActions();
+  const providerOptions = ["all", ...new Set(selectedStreams.map(streamProviderName))];
+  if (!providerOptions.includes(selectedStreamProviderFilter)) {
+    selectedStreamProviderFilter = "all";
+  }
+  const visibleStreams = selectedStreams
+    .map((stream, index) => ({ stream, index }))
+    .filter(({ stream }) => selectedStreamProviderFilter === "all" || streamProviderName(stream) === selectedStreamProviderFilter);
+
   streamsEl.classList.remove("empty");
   streamsEl.innerHTML = `
     <p class="eyebrow">Stream sources</p>
     <h3>${title}</h3>
-    <div class="stream-list">
-      ${selectedStreams
+    <div class="stream-provider-tabs">
+      ${providerOptions
         .map(
-          (stream, index) => `
-            <article class="stream-card ${index === selectedStreamIndex ? "is-active" : ""}">
-              <h3>${stream.name}</h3>
-              <p class="stream-meta">${stream.quality} • ${stream.language}</p>
-              <div class="provider-badge-row">
-                <span class="provider-badge ${playbackKindClass(stream)}">${playbackKindLabel(stream)}</span>
+          (provider) => `
+            <button
+              class="stream-provider-tab ${provider === selectedStreamProviderFilter ? "is-active" : ""}"
+              data-stream-provider="${escapeHtml(provider)}"
+            >
+              ${escapeHtml(streamProviderTabLabel(provider))}
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+    <div class="stream-list stream-option-list">
+      ${visibleStreams
+        .map(
+          ({ stream, index }) => `
+            <article class="stream-card stream-option-card ${index === selectedStreamIndex ? "is-active" : ""}">
+              <div class="stream-option-top">
+                <div>
+                  <p class="stream-option-quality">${escapeHtml(stream.quality || "Unknown quality")}</p>
+                  <h3>${escapeHtml(streamDisplayTitle(stream))}</h3>
+                </div>
+                <div class="provider-badge-row">
+                  <span class="provider-badge ${playbackKindClass(stream)}">${playbackKindLabel(stream)}</span>
+                </div>
               </div>
-              <p class="stream-meta">${escapeHtml(stream.playback_note || "Source compatibility unknown.")}</p>
-              <button class="stream-button ${index === selectedStreamIndex ? "is-active" : ""}" data-stream-index="${index}">
-                ${streamSelectionLabel(stream, index === selectedStreamIndex)}
-              </button>
-              <button class="ghost-button stream-link" data-open-stream-index="${index}">${openSourceLabel(stream)}</button>
+              <p class="stream-option-subtitle">${escapeHtml(streamSourceLine(stream))}</p>
+              <div class="stream-option-detail-list">
+                ${streamDetailLines(stream)
+                  .map((detail) => `<p class="stream-option-detail">${escapeHtml(detail)}</p>`)
+                  .join("")}
+              </div>
+              <p class="stream-option-note">${escapeHtml(stream.playback_note || "No extra source details yet.")}</p>
+              <div class="stream-option-actions">
+                <button class="stream-button ${index === selectedStreamIndex ? "is-active" : ""}" data-stream-index="${index}">
+                  ${streamSelectionLabel(stream, index === selectedStreamIndex)}
+                </button>
+                <button class="ghost-button stream-link" data-open-stream-index="${index}">${openSourceLabel(stream)}</button>
+              </div>
+              <p class="stream-option-provider">${escapeHtml(streamProviderName(stream))}</p>
             </article>
           `,
         )
         .join("")}
     </div>
-    <p class="stream-meta">Active source: ${activeSource.name} at ${activeSource.quality} • ${playbackKindLabel(activeSource)}</p>
+    ${
+      lookupCandidates.length > 0
+        ? `
+          <div class="stream-candidate-block">
+            <p class="eyebrow">More source options</p>
+            <div class="stream-list stream-option-list">
+              ${lookupCandidates
+                .map(
+                  (candidate, index) => `
+                    <article class="stream-card stream-option-card">
+                      <div class="stream-option-top">
+                        <div>
+                          <p class="stream-option-quality">Candidate</p>
+                          <h3>${escapeHtml(candidate.name || "Addon source")}</h3>
+                        </div>
+                        <div class="provider-badge-row">
+                          <span class="provider-badge is-pending">Magnet</span>
+                        </div>
+                      </div>
+                      <p class="stream-option-subtitle">${escapeHtml(candidate.detail || "Addable source candidate")}</p>
+                      <p class="stream-option-note">This option can be sent to TorBox to prepare playback.</p>
+                      <div class="stream-option-actions">
+                        <button
+                          class="stream-button"
+                          data-lookup-candidate-index="${index}"
+                          ${canSubmitCandidates ? "" : "disabled"}
+                        >
+                          ${canSubmitCandidates ? "Send to TorBox" : "TorBox required"}
+                        </button>
+                      </div>
+                    </article>
+                  `,
+                )
+                .join("")}
+            </div>
+          </div>
+        `
+        : ""
+    }
+    <p class="stream-meta">
+      Showing ${visibleStreams.length} option${visibleStreams.length === 1 ? "" : "s"}
+      from ${selectedStreamProviderFilter === "all" ? "all providers" : streamProviderName(activeSource)}
+    </p>
+    <p class="stream-meta">Active source: ${escapeHtml(streamDisplayTitle(activeSource))} • ${escapeHtml(streamProviderName(activeSource))} • ${escapeHtml(activeSource.quality)} • ${playbackKindLabel(activeSource)}</p>
   `;
+
+  streamsEl.querySelectorAll("[data-stream-provider]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedStreamProviderFilter = button.dataset.streamProvider || "all";
+      renderStreams(title);
+    });
+  });
 
   streamsEl.querySelectorAll("[data-stream-index]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -636,6 +725,101 @@ function renderStreams(title) {
       await openStreamExternally(stream);
     });
   });
+
+  streamsEl.querySelectorAll("[data-lookup-candidate-index]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const candidateIndex = Number(button.dataset.lookupCandidateIndex);
+      const candidate = lookupCandidates[candidateIndex];
+      if (!candidate?.magnet_url || !selectedItemId) {
+        return;
+      }
+
+      const item = await getItem(selectedItemId);
+      torboxSubmissionState = {
+        pending: true,
+        status: "pending",
+        message: `Sending "${candidate.name || "candidate"}" to TorBox...`,
+      };
+      renderStreams(item.title);
+
+      try {
+        const result = await invoke("submit_torbox_magnet", {
+          id: item.id,
+          magnet: candidate.magnet_url,
+          onlyIfCached: torboxCachedOnly,
+        });
+
+        torboxSubmissionState = {
+          pending: false,
+          status: result.status,
+          message: result.message,
+        };
+
+        await selectItem(item.id);
+      } catch (error) {
+        torboxSubmissionState = {
+          pending: false,
+          status: "error",
+          message: String(error),
+        };
+        renderStreams(item.title);
+      }
+    });
+  });
+}
+
+function streamProviderName(stream) {
+  if (stream?.provider) {
+    return stream.provider;
+  }
+  const [provider] = String(stream?.name ?? "").split(" • ");
+  return provider?.trim() || "Unknown";
+}
+
+function streamDisplayTitle(stream) {
+  if (stream?.full_title) {
+    return stream.full_title;
+  }
+  const parts = String(stream?.name ?? "").split(" • ").map((part) => part.trim()).filter(Boolean);
+  if (parts.length <= 1) {
+    return stream?.name ?? "Unnamed stream";
+  }
+  return parts.slice(1).join(" • ");
+}
+
+function streamProviderTabLabel(provider) {
+  return provider === "all" ? "All" : provider;
+}
+
+function streamSourceLine(stream) {
+  const parts = [];
+  parts.push(streamProviderName(stream));
+  parts.push(stream.language || "unknown");
+  parts.push(playbackSummary(stream));
+
+  const details = Array.isArray(stream?.details) ? stream.details.filter(Boolean) : [];
+  if (details.length > 0) {
+    parts.push(details[0]);
+  }
+
+  return parts.join(" • ");
+}
+
+function streamDetailLines(stream) {
+  return Array.isArray(stream?.details) ? stream.details.filter(Boolean) : [];
+}
+
+function playbackSummary(stream) {
+  if (stream?.playback_kind === "embedded") {
+    return "ready to play";
+  }
+  if (stream?.playback_kind === "external") {
+    return "opens externally";
+  }
+  if (stream?.playback_kind === "blocked") {
+    return "blocked in app";
+  }
+  return "source";
 }
 
 function renderNoStreams(item, lookup) {
