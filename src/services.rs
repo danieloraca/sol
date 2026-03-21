@@ -37,7 +37,20 @@ impl AppServices {
     }
 
     pub fn search(&self, query: &str) -> Vec<MediaItem> {
-        self.addons.read().expect("addon registry read lock").search(query)
+        let registry = self.addons.read().expect("addon registry read lock");
+        let results = registry.search(query);
+        if !results.is_empty() || query.trim().is_empty() {
+            return results;
+        }
+
+        // Fallback: if addons don't expose a dedicated search resource,
+        // run a local query across catalog items so sidebar search still works.
+        let query = query.trim().to_lowercase();
+        registry
+            .catalog(None)
+            .into_iter()
+            .filter(|item| media_item_matches_query(item, &query))
+            .collect()
     }
 
     pub fn item(&self, id: &str) -> Option<MediaItem> {
@@ -166,4 +179,14 @@ impl AppServices {
         *self.addons.write().expect("addon registry write lock") =
             AddonRegistry::from_manifest_urls(&urls);
     }
+}
+
+fn media_item_matches_query(item: &MediaItem, query: &str) -> bool {
+    item.title.to_lowercase().contains(query)
+        || item.description.to_lowercase().contains(query)
+        || item.id.to_lowercase().contains(query)
+        || item
+            .genres
+            .iter()
+            .any(|genre| genre.to_lowercase().contains(query))
 }

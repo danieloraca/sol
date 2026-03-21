@@ -27,11 +27,15 @@
 
         <label class="search">
           <span>Search catalog</span>
-          <input
-            id="search"
-            type="search"
-            placeholder="Try atlas, ambient, sci-fi..."
-          />
+          <div class="search-row">
+            <input
+              id="search"
+              type="search"
+              placeholder="Try atlas, ambient, sci-fi..."
+            />
+            <button id="search-button" class="ghost-button search-button" type="button">Search</button>
+          </div>
+          <p id="search-feedback" class="meta"></p>
         </label>
 
         <section class="addon-manager">

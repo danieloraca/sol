@@ -8,6 +8,8 @@ const continueWatchingEl = document.querySelector("#continue-watching");
 const catalogEl = document.querySelector("#catalog");
 const streamsEl = document.querySelector("#streams");
 const searchEl = document.querySelector("#search");
+const searchButtonEl = document.querySelector("#search-button");
+const searchFeedbackEl = document.querySelector("#search-feedback");
 const addonUrlEl = document.querySelector("#addon-url");
 const installAddonButtonEl = document.querySelector("#install-addon");
 const addonFeedbackEl = document.querySelector("#addon-feedback");
@@ -20,6 +22,7 @@ const PLAYBACK_START_TIMEOUT_MS = 4000;
 
 let activeFilter = "";
 let itemCache = new Map();
+let catalogItemsCache = [];
 let homeFeed = null;
 let selectedItemId = null;
 let selectedStreams = [];
@@ -60,11 +63,21 @@ async function bootstrap() {
   await selectItem(homeFeed.hero.id);
 
   searchEl.addEventListener("input", handleSearch);
+  searchEl.addEventListener("keydown", async (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      await runSearch();
+    }
+  });
+  searchButtonEl?.addEventListener("click", async () => {
+    await runSearch();
+  });
   filterButtons.forEach((button) => {
     button.addEventListener("click", async () => {
       activeFilter = button.dataset.filter ?? "";
       filterButtons.forEach((item) => item.classList.toggle("is-active", item === button));
       searchEl.value = "";
+      setSearchFeedback("");
       await renderCatalog();
     });
   });
@@ -122,7 +135,13 @@ async function renderCatalog() {
     mediaType: activeFilter || null,
   });
 
+  catalogItemsCache = items;
   cacheItems(items);
+  if (items.length === 0) {
+    renderCatalogEmpty("No titles available for this filter yet.");
+    return;
+  }
+
   catalogEl.innerHTML = items.map(renderCard).join("");
   bindCatalogButtons(catalogEl);
 }
@@ -317,21 +336,68 @@ async function reloadAddonDrivenViews() {
 }
 
 async function handleSearch(event) {
-  const query = event.target.value.trim();
+  // Keep live-search behavior for quick filtering while typing.
+  await runSearch(event.target.value);
+}
+
+async function runSearch(rawQuery = searchEl?.value ?? "") {
+  const query = rawQuery.trim();
   if (!query) {
+    setSearchFeedback("");
     await renderCatalog();
     return;
   }
 
-  const items = await invoke("search_catalog", { query });
+  setSearchFeedback(`Searching for "${query}"...`);
+  let items = await invoke("search_catalog", { query });
+  if (items.length === 0 && catalogItemsCache.length > 0) {
+    items = filterCatalogItemsLocally(catalogItemsCache, query);
+  }
   cacheItems(items);
 
   const filtered = activeFilter
     ? items.filter((item) => item.media_type === activeFilter)
     : items;
 
+  if (filtered.length === 0) {
+    setSearchFeedback(`No matches for "${query}".`);
+    renderCatalogEmpty(`No results for "${query}".`);
+    return;
+  }
+
+  setSearchFeedback(`${filtered.length} match${filtered.length === 1 ? "" : "es"} for "${query}".`);
   catalogEl.innerHTML = filtered.map(renderCard).join("");
   bindCatalogButtons(catalogEl);
+}
+
+function setSearchFeedback(message) {
+  if (!searchFeedbackEl) {
+    return;
+  }
+  searchFeedbackEl.textContent = message;
+}
+
+function filterCatalogItemsLocally(items, query) {
+  const normalized = query.trim().toLowerCase();
+  return items.filter((item) => {
+    const genres = (item.genres || []).join(" ").toLowerCase();
+    return (
+      String(item.title || "").toLowerCase().includes(normalized)
+      || String(item.description || "").toLowerCase().includes(normalized)
+      || String(item.id || "").toLowerCase().includes(normalized)
+      || genres.includes(normalized)
+    );
+  });
+}
+
+function renderCatalogEmpty(message) {
+  catalogEl.innerHTML = `
+    <article class="card catalog-empty">
+      <p class="eyebrow">Catalog</p>
+      <h3>No matches</h3>
+      <p>${escapeHtml(message)}</p>
+    </article>
+  `;
 }
 
 function bindCatalogButtons(scope) {
