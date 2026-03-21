@@ -33,6 +33,7 @@ let playbackDurationSeconds = 0;
 let pendingSeekSeconds = null;
 let lastPlaybackError = "";
 let lastPlaybackNotice = "";
+let lastPlaybackNoticeKind = "";
 let playbackStartTimer = null;
 let torboxSubmissionState = null;
 let torboxDraftMagnet = "";
@@ -421,6 +422,7 @@ function renderPlayer(item) {
   }
   const videoPoster = heroArtworkUrl(item) || item.poster_url;
   const escapedPoster = videoPoster ? `poster="${escapeHtml(videoPoster)}"` : "";
+  const escapedVideoUrl = activeStream.url ? `data-playback-url="${escapeHtml(activeStream.url)}"` : "";
 
   playerStageEl.innerHTML = `
     <div class="player-screen is-video">
@@ -428,9 +430,7 @@ function renderPlayer(item) {
         <div class="player-art ${heroArtworkUrl(item) ? "" : "is-fallback"}">
           ${renderArtworkImage(item, "player-poster")}
         </div>
-        <video id="player-video" class="player-video" preload="metadata" playsinline ${escapedPoster}>
-          <source src="${escapeHtml(activeStream.url)}" />
-        </video>
+        <video id="player-video" class="player-video" preload="metadata" playsinline crossorigin="anonymous" ${escapedPoster} ${escapedVideoUrl}></video>
       </div>
       <div class="player-badges">
         <span class="badge">${item.media_type}</span>
@@ -1032,7 +1032,7 @@ function sourceSearchBadgeLabel(sourceSearch) {
     case "ready":
       return `Sources ready • ${sourceSearch.releases.length} results`;
     case "no_results":
-      return "No automatic sources";
+      return "No addon sources";
     case "unavailable":
       return "Auto search unavailable";
     case "request_failed":
@@ -1213,7 +1213,7 @@ async function attemptAutoPlay(item, options = {}) {
       torboxSubmissionState = {
         pending: false,
         status: "auto_unavailable",
-        message: sourceSearchState?.message || "Sol could not find an automatic source for this title yet.",
+        message: sourceSearchState?.message || selectedLookup?.message || "Sol could not find an automatic source for this title yet.",
       };
       manualSourceToolsVisible = true;
       renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
@@ -1296,6 +1296,7 @@ function setPlaybackState(nextState) {
       isPlaybackStarting = false;
       lastPlaybackError = playbackBlockReason;
       lastPlaybackNotice = "";
+      lastPlaybackNoticeKind = "";
       syncPlayerUi(item, stream);
       return;
     }
@@ -1306,6 +1307,7 @@ function setPlaybackState(nextState) {
       isPlaybackStarting = true;
       lastPlaybackError = "";
       lastPlaybackNotice = "";
+      lastPlaybackNoticeKind = "";
       armPlaybackStartWatchdog(item, stream, video);
       video.play().catch((error) => {
         isPlaying = false;
@@ -1313,6 +1315,7 @@ function setPlaybackState(nextState) {
         clearPlaybackStartWatchdog();
         lastPlaybackError = `Playback could not start: ${error.message ?? error}`;
         lastPlaybackNotice = "";
+        lastPlaybackNoticeKind = "";
         syncPlayerUi(item, stream);
       });
     } else {
@@ -1333,6 +1336,12 @@ function mountPlayer(item, stream) {
   const video = document.querySelector("#player-video");
   if (!video) {
     return;
+  }
+
+  const playbackUrl = video.dataset.playbackUrl || stream.url || "";
+  if (video.src !== playbackUrl) {
+    video.src = playbackUrl;
+    video.load();
   }
 
   video.addEventListener("click", () => {
@@ -1356,8 +1365,26 @@ function mountPlayer(item, stream) {
   video.addEventListener("canplay", () => {
     clearPlaybackStartWatchdog();
     if (!lastPlaybackError) {
+      lastPlaybackNotice = "Stream loaded. Starting playback...";
+      lastPlaybackNoticeKind = "info";
       syncPlayerUi(item, stream);
     }
+  });
+
+  video.addEventListener("loadeddata", () => {
+    lastPlaybackNotice = "First video frame loaded.";
+    lastPlaybackNoticeKind = "info";
+    syncPlaybackFromVideo(item, stream, video);
+  });
+
+  video.addEventListener("playing", () => {
+    clearPlaybackStartWatchdog();
+    isPlaybackStarting = false;
+    isPlaying = true;
+    lastPlaybackError = "";
+    lastPlaybackNotice = "Video is rendering in the embedded player.";
+    lastPlaybackNoticeKind = "info";
+    syncPlaybackFromVideo(item, stream, video);
   });
 
   video.addEventListener("timeupdate", () => {
@@ -1369,7 +1396,8 @@ function mountPlayer(item, stream) {
     isPlaybackStarting = false;
     isPlaying = true;
     lastPlaybackError = "";
-    lastPlaybackNotice = "";
+    lastPlaybackNotice = "Playback started.";
+    lastPlaybackNoticeKind = "info";
     syncPlaybackFromVideo(item, stream, video);
   });
 
@@ -1397,7 +1425,24 @@ function mountPlayer(item, stream) {
     isPlaying = false;
     lastPlaybackError = describeVideoError(video, stream);
     lastPlaybackNotice = "";
+    lastPlaybackNoticeKind = "";
     syncPlayerUi(item, stream);
+  });
+
+  video.addEventListener("waiting", () => {
+    if (!lastPlaybackError) {
+      lastPlaybackNotice = "Waiting for the stream to buffer...";
+      lastPlaybackNoticeKind = "info";
+      syncPlayerUi(item, stream);
+    }
+  });
+
+  video.addEventListener("stalled", () => {
+    if (!lastPlaybackError) {
+      lastPlaybackNotice = "The stream stalled before the player could render it.";
+      lastPlaybackNoticeKind = "info";
+      syncPlayerUi(item, stream);
+    }
   });
 
   syncPlayerUi(item, stream);
@@ -1461,12 +1506,16 @@ function playbackStatusLabel() {
     return "Playback issue";
   }
 
-  if (lastPlaybackNotice) {
+  if (lastPlaybackNoticeKind === "external") {
     return "External handoff";
   }
 
   if (isPlaybackStarting) {
     return "Starting";
+  }
+
+  if (lastPlaybackNoticeKind === "info" && /waiting|buffer/i.test(lastPlaybackNotice)) {
+    return "Buffering";
   }
 
   if (isPlaying) {
@@ -1540,6 +1589,7 @@ function resetPlaybackSession() {
   pendingSeekSeconds = null;
   lastPlaybackError = "";
   lastPlaybackNotice = "";
+  lastPlaybackNoticeKind = "";
 }
 
 function formatPlaybackTime(item) {
@@ -1557,14 +1607,25 @@ function armPlaybackStartWatchdog(item, stream, video) {
 
     isPlaybackStarting = false;
     isPlaying = false;
-    lastPlaybackError = getPlaybackBlockReason(stream)
-      || "This source did not become playable in the embedded player. Try Open source URL or switch to another source.";
-    lastPlaybackNotice = "";
-    syncPlayerUi(item, stream);
-
     if (!video.paused) {
       video.pause();
     }
+
+    const playbackBlockReason = getPlaybackBlockReason(stream);
+    if (!playbackBlockReason && stream?.playback_kind === "embedded" && stream?.url) {
+      lastPlaybackError = "";
+      lastPlaybackNotice = "Embedded playback stalled. Opening the source externally...";
+      lastPlaybackNoticeKind = "info";
+      syncPlayerUi(item, stream);
+      void openStreamExternally(stream, { fromPlayAction: true, autoFallback: true });
+      return;
+    }
+
+    lastPlaybackError = playbackBlockReason
+      || "This source did not become playable in the embedded player. Try Open source URL or switch to another source.";
+    lastPlaybackNotice = "";
+    lastPlaybackNoticeKind = "";
+    syncPlayerUi(item, stream);
   }, PLAYBACK_START_TIMEOUT_MS);
 }
 
@@ -1596,7 +1657,7 @@ function getPlaybackBlockReason(stream) {
 }
 
 async function openStreamExternally(stream, options = {}) {
-  const { fromPlayAction = false } = options;
+  const { fromPlayAction = false, autoFallback = false } = options;
   const item = currentItem();
   if (!stream?.url || !invoke) {
     return;
@@ -1608,9 +1669,12 @@ async function openStreamExternally(stream, options = {}) {
     isPlaybackStarting = false;
     clearPlaybackStartWatchdog();
     lastPlaybackError = "";
-    lastPlaybackNotice = fromPlayAction
-      ? `${stream.name} was opened outside the app.`
-      : `Opened ${stream.name} outside the app.`;
+    lastPlaybackNotice = autoFallback
+      ? `Embedded playback stalled, so ${stream.name} was opened outside the app.`
+      : fromPlayAction
+        ? `${stream.name} was opened outside the app.`
+        : `Opened ${stream.name} outside the app.`;
+    lastPlaybackNoticeKind = "external";
     syncPlayerUi(item, stream);
   } catch (error) {
     isPlaying = false;
@@ -1618,6 +1682,7 @@ async function openStreamExternally(stream, options = {}) {
     clearPlaybackStartWatchdog();
     lastPlaybackError = `Could not open this source externally: ${error.message ?? error}`;
     lastPlaybackNotice = "";
+    lastPlaybackNoticeKind = "";
     syncPlayerUi(item, stream);
   }
 }

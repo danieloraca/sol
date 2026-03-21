@@ -67,6 +67,7 @@ impl AddonRegistry {
             .filter_map(|url| RemoteHttpAddon::install(url).ok())
             .map(|addon| Arc::new(addon) as Arc<dyn SolAddon>)
             .collect();
+        addons.sort_by_key(|addon| remote_addon_priority(&addon.descriptor()));
 
         addons.push(Arc::new(TmdbMetadataAddon::new()) as Arc<dyn SolAddon>);
         addons.push(Arc::new(TorboxStreamAddon::new()) as Arc<dyn SolAddon>);
@@ -261,8 +262,11 @@ impl AddonRegistry {
             .next()
             .unwrap_or_else(|| SourceSearchResult {
                 provider: "Addons".into(),
-                status: "unavailable".into(),
-                message: "No source-search addon is configured.".into(),
+                status: "no_results".into(),
+                message: format!(
+                    "Installed addons did not return any addable source candidates for {}.",
+                    item.title
+                ),
                 releases: vec![],
             })
     }
@@ -1384,6 +1388,21 @@ fn resource_name_matches(actual: &str, expected: &str) -> bool {
     normalize_resource_name(actual) == normalize_resource_name(expected)
 }
 
+fn remote_addon_priority(descriptor: &AddonDescriptor) -> u8 {
+    let haystack = format!(
+        "{} {} {}",
+        descriptor.id.to_ascii_lowercase(),
+        descriptor.name.to_ascii_lowercase(),
+        descriptor.source.to_ascii_lowercase()
+    );
+
+    if haystack.contains("torbox") {
+        0
+    } else {
+        1
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use reqwest::blocking::Client;
@@ -1392,9 +1411,9 @@ mod tests {
         AddonRegistry, ProwlarrSearchAddon, RemoteHttpAddon, RemoteManifest, RemoteResourceEntry,
         RemoteResourceObject, RemoteStream, SolAddon, dedupe_stream_sources,
         map_remote_stream_source_release,
-        media_id_candidates, select_supported_resource_id,
+        media_id_candidates, remote_addon_priority, select_supported_resource_id,
     };
-    use crate::domain::{MediaItem, MediaType, StreamSource};
+    use crate::domain::{AddonDescriptor, AddonTransport, MediaItem, MediaType, StreamSource};
 
     #[test]
     fn builtin_registry_contains_demo_addon() {
@@ -1526,5 +1545,35 @@ mod tests {
         };
 
         assert!(addon.source_search(&item).is_none());
+    }
+
+    #[test]
+    fn torbox_remote_addons_are_prioritized_first() {
+        let torbox = AddonDescriptor {
+            id: "remote.torbox".into(),
+            name: "TorBox".into(),
+            version: "1.0.0".into(),
+            transport: AddonTransport::Remote,
+            enabled: true,
+            configured: true,
+            health_status: "healthy".into(),
+            health_message: String::new(),
+            capabilities: vec!["stream".into()],
+            source: "https://example.com/torbox/manifest.json".into(),
+        };
+        let other = AddonDescriptor {
+            id: "remote.other".into(),
+            name: "AIOStreams".into(),
+            version: "1.0.0".into(),
+            transport: AddonTransport::Remote,
+            enabled: true,
+            configured: true,
+            health_status: "healthy".into(),
+            health_message: String::new(),
+            capabilities: vec!["stream".into()],
+            source: "https://example.com/aio/manifest.json".into(),
+        };
+
+        assert!(remote_addon_priority(&torbox) < remote_addon_priority(&other));
     }
 }
