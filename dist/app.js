@@ -50,6 +50,7 @@ let selectedAddonSource = null;
 let autoPlayPending = false;
 let manualSourceToolsVisible = false;
 let autoPlayTrace = null;
+let lastExecutedSearch = "";
 
 async function bootstrap() {
   if (!invoke) {
@@ -77,6 +78,7 @@ async function bootstrap() {
       activeFilter = button.dataset.filter ?? "";
       filterButtons.forEach((item) => item.classList.toggle("is-active", item === button));
       searchEl.value = "";
+      lastExecutedSearch = "";
       setSearchFeedback("");
       await renderCatalog();
     });
@@ -336,8 +338,14 @@ async function reloadAddonDrivenViews() {
 }
 
 async function handleSearch(event) {
-  // Keep live-search behavior for quick filtering while typing.
-  await runSearch(event.target.value);
+  const query = (event.target.value || "").trim();
+  if (!query) {
+    setSearchFeedback("");
+    await renderCatalog();
+    return;
+  }
+
+  setSearchFeedback(`Ready to search "${query}". Press Enter or Search.`);
 }
 
 async function runSearch(rawQuery = searchEl?.value ?? "") {
@@ -345,6 +353,11 @@ async function runSearch(rawQuery = searchEl?.value ?? "") {
   if (!query) {
     setSearchFeedback("");
     await renderCatalog();
+    return;
+  }
+
+  if (query === lastExecutedSearch) {
+    setSearchFeedback(`Showing previous results for "${query}".`);
     return;
   }
 
@@ -360,14 +373,22 @@ async function runSearch(rawQuery = searchEl?.value ?? "") {
     : items;
 
   if (filtered.length === 0) {
+    lastExecutedSearch = query;
     setSearchFeedback(`No matches for "${query}".`);
     renderCatalogEmpty(`No results for "${query}".`);
     return;
   }
 
+  lastExecutedSearch = query;
   setSearchFeedback(`${filtered.length} match${filtered.length === 1 ? "" : "es"} for "${query}".`);
   catalogEl.innerHTML = filtered.map(renderCard).join("");
   bindCatalogButtons(catalogEl);
+
+  // Make search feel immediate in the main player panel too.
+  const firstMatch = filtered[0];
+  if (firstMatch && firstMatch.id !== selectedItemId) {
+    await selectItem(firstMatch.id);
+  }
 }
 
 function setSearchFeedback(message) {
