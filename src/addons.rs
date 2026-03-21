@@ -1179,7 +1179,12 @@ fn dedupe_media_items(items: Vec<MediaItem>) -> Vec<MediaItem> {
 }
 
 fn dedupe_stream_sources(mut streams: Vec<StreamSource>) -> Vec<StreamSource> {
-    streams.sort_by_key(|stream| playback_rank(&stream.playback_kind));
+    streams.sort_by_key(|stream| {
+        (
+            playback_rank(&stream.playback_kind),
+            stream_url_rank(&stream.url, &stream.playback_kind),
+        )
+    });
 
     let mut seen = BTreeSet::new();
     streams
@@ -1202,6 +1207,23 @@ fn playback_rank(playback_kind: &str) -> u8 {
         "external" => 1,
         "blocked" => 2,
         _ => 3,
+    }
+}
+
+fn stream_url_rank(url: &str, playback_kind: &str) -> u8 {
+    if playback_kind != "embedded" {
+        return 9;
+    }
+
+    let lowercase = url.to_lowercase();
+    if lowercase.contains(".m3u8") || lowercase.contains("/hls") {
+        0
+    } else if lowercase.contains(".mpd") {
+        1
+    } else if lowercase.contains(".mp4") || lowercase.contains(".webm") {
+        2
+    } else {
+        8
     }
 }
 
@@ -1282,6 +1304,12 @@ fn map_remote_stream_source(stream: RemoteStream) -> Option<StreamSource> {
             "This source uses plain HTTP and cannot be embedded here. Open it externally instead."
                 .to_string(),
         ),
+        (Some(url), _)
+            if is_download_like_media_url(&url) => (
+            url,
+            "external".to_string(),
+            "This source appears to be a direct download-style file and is unlikely to play in the embedded player.".to_string(),
+        ),
         (Some(url), _) => (
             url,
             "embedded".to_string(),
@@ -1305,6 +1333,17 @@ fn map_remote_stream_source(stream: RemoteStream) -> Option<StreamSource> {
         playback_kind,
         playback_note,
     })
+}
+
+fn is_download_like_media_url(url: &str) -> bool {
+    let lowercase = url.to_lowercase();
+    lowercase.contains(".mkv")
+        || lowercase.contains(".avi")
+        || lowercase.contains(".mov")
+        || lowercase.contains(".wmv")
+        || lowercase.contains(".flv")
+        || lowercase.contains(".iso")
+        || lowercase.contains(".torrent")
 }
 
 fn remote_stream_details(value: &str) -> Vec<String> {

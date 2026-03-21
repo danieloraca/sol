@@ -1634,7 +1634,6 @@ function mountPlayer(item, stream) {
   });
 
   video.addEventListener("canplay", () => {
-    clearPlaybackStartWatchdog();
     if (!lastPlaybackError) {
       lastPlaybackNotice = "Stream loaded. Starting playback...";
       lastPlaybackNoticeKind = "info";
@@ -1659,15 +1658,21 @@ function mountPlayer(item, stream) {
   });
 
   video.addEventListener("timeupdate", () => {
+    if (video.currentTime > 0) {
+      clearPlaybackStartWatchdog();
+      isPlaybackStarting = false;
+      isPlaying = true;
+    }
     syncPlaybackFromVideo(item, stream, video);
   });
 
   video.addEventListener("play", () => {
-    clearPlaybackStartWatchdog();
-    isPlaybackStarting = false;
-    isPlaying = true;
+    if (!isPlaybackStarting) {
+      isPlaybackStarting = true;
+    }
+    isPlaying = false;
     lastPlaybackError = "";
-    lastPlaybackNotice = "Playback started.";
+    lastPlaybackNotice = "Starting playback...";
     lastPlaybackNoticeKind = "info";
     syncPlaybackFromVideo(item, stream, video);
   });
@@ -1701,6 +1706,10 @@ function mountPlayer(item, stream) {
   });
 
   video.addEventListener("waiting", () => {
+    if (video.currentTime <= 0 && !isPlaybackStarting) {
+      isPlaybackStarting = true;
+      armPlaybackStartWatchdog(item, stream, video);
+    }
     if (!lastPlaybackError) {
       lastPlaybackNotice = "Waiting for the stream to buffer...";
       lastPlaybackNoticeKind = "info";
@@ -1709,6 +1718,10 @@ function mountPlayer(item, stream) {
   });
 
   video.addEventListener("stalled", () => {
+    if (video.currentTime <= 0 && !isPlaybackStarting) {
+      isPlaybackStarting = true;
+      armPlaybackStartWatchdog(item, stream, video);
+    }
     if (!lastPlaybackError) {
       lastPlaybackNotice = "The stream stalled before the player could render it.";
       lastPlaybackNoticeKind = "info";
@@ -1883,17 +1896,8 @@ function armPlaybackStartWatchdog(item, stream, video) {
     }
 
     const playbackBlockReason = getPlaybackBlockReason(stream);
-    if (!playbackBlockReason && stream?.playback_kind === "embedded" && stream?.url) {
-      lastPlaybackError = "";
-      lastPlaybackNotice = "Embedded playback stalled. Opening the source externally...";
-      lastPlaybackNoticeKind = "info";
-      syncPlayerUi(item, stream);
-      void openStreamExternally(stream, { fromPlayAction: true, autoFallback: true });
-      return;
-    }
-
     lastPlaybackError = playbackBlockReason
-      || "This source did not become playable in the embedded player. Try Open source URL or switch to another source.";
+      || "This source did not become playable in the embedded player. Try Next source or Open source URL.";
     lastPlaybackNotice = "";
     lastPlaybackNoticeKind = "";
     syncPlayerUi(item, stream);
