@@ -28,6 +28,63 @@ body {
   color: var(--text);
 }
 
+body.is-player-fullscreen {
+  overflow: hidden;
+}
+
+body.is-player-fullscreen .shell {
+  grid-template-columns: 1fr;
+}
+
+body.is-player-fullscreen .sidebar {
+  display: none;
+}
+
+body.is-player-fullscreen .content {
+  padding: 0;
+  gap: 0;
+}
+
+body.is-player-fullscreen .player-view {
+  min-height: 100vh;
+  gap: 0;
+}
+
+body.is-player-fullscreen .player-view-heading,
+body.is-player-fullscreen .player-sidebar {
+  display: none;
+}
+
+body.is-player-fullscreen .player-shell {
+  display: block;
+}
+
+body.is-player-fullscreen .player-stage {
+  min-height: 100vh;
+  height: 100vh;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+body.is-player-fullscreen .player-video-shell,
+body.is-player-fullscreen .player-art,
+body.is-player-fullscreen .player-stage::before {
+  inset: 0;
+  border-radius: 0;
+}
+
+body.is-player-fullscreen .player-video-tools {
+  top: 18px;
+  right: 18px;
+}
+
+body.is-player-fullscreen .player-fullscreen-mini {
+  right: 18px;
+  bottom: 18px;
+}
+
 .shell {
   display: grid;
   grid-template-columns: 330px 1fr;
@@ -188,6 +245,20 @@ body {
   display: grid;
   gap: 14px;
   align-content: start;
+}
+
+.player-view .player-shell {
+  grid-template-columns: 1fr;
+}
+
+.player-view .player-stage {
+  width: 100%;
+  min-height: 460px;
+  height: clamp(460px, 62vw, 760px);
+}
+
+.player-view .player-sidebar {
+  width: 100%;
 }
 
 .search-view-heading {
@@ -560,8 +631,7 @@ body {
 }
 
 .player-screen.is-video .player-overlay,
-.player-screen.is-video .player-badges,
-.player-screen.is-video .player-progress {
+.player-screen.is-video .player-badges {
   position: relative;
   z-index: 1;
   pointer-events: none;
@@ -569,6 +639,33 @@ body {
 
 .player-screen.is-video.is-playing .player-overlay {
   opacity: 0;
+}
+
+.player-video-tools {
+  position: absolute;
+  top: 28px;
+  right: 28px;
+  z-index: 2;
+  pointer-events: auto;
+}
+
+.player-fullscreen-button {
+  min-width: 128px;
+}
+
+.player-fullscreen-mini {
+  position: absolute;
+  right: 28px;
+  bottom: 28px;
+  z-index: 3;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.05rem;
+  border-radius: 999px;
 }
 
 .player-badges,
@@ -800,7 +897,7 @@ body {
 }
 
 .control-row {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
 .control-button {

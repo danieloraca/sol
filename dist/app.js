@@ -62,6 +62,8 @@ let lastExecutedSearch = "";
 let isSearchViewActive = false;
 let currentPage = "main";
 let playerReturnPage = "main";
+let fullscreenListenerBound = false;
+let isPlayerFullscreen = false;
 
 async function bootstrap() {
   if (!invoke) {
@@ -125,6 +127,23 @@ async function bootstrap() {
       addonFeedbackEl.textContent = String(error);
     }
   });
+
+  if (!fullscreenListenerBound) {
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && isPlayerFullscreen) {
+        setPlayerFullscreen(false);
+      }
+    });
+
+    document.addEventListener("fullscreenchange", () => {
+      const item = currentItem();
+      const stream = activeStreamForSelection();
+      if (item && stream) {
+        syncPlayerUi(item, stream);
+      }
+    });
+    fullscreenListenerBound = true;
+  }
 }
 
 async function renderHome() {
@@ -475,6 +494,7 @@ function showSearchView() {
     return;
   }
   currentPage = "search";
+  setPlayerFullscreen(false);
   isSearchViewActive = true;
   mainViewEl.classList.add("is-hidden");
   playerViewEl.classList.add("is-hidden");
@@ -487,6 +507,7 @@ function showMainView() {
     return;
   }
   currentPage = "main";
+  setPlayerFullscreen(false);
   isSearchViewActive = false;
   searchViewEl.classList.add("is-hidden");
   playerViewEl.classList.add("is-hidden");
@@ -608,13 +629,18 @@ function renderPlayer(item) {
         <div class="player-art ${heroArtworkUrl(item) ? "" : "is-fallback"}">
           ${renderArtworkImage(item, "player-poster")}
         </div>
-        <video id="player-video" class="player-video" preload="metadata" playsinline ${escapedPoster} ${escapedVideoUrl}></video>
+        <video id="player-video" class="player-video" preload="metadata" playsinline controls ${escapedPoster} ${escapedVideoUrl}></video>
       </div>
       <div class="player-badges">
         <span class="badge">${item.media_type}</span>
         <span class="badge">${item.year}</span>
         <span class="badge">${activeStream.quality}</span>
         <span class="badge" id="player-status-badge">${isPlaying ? "Playing now" : "Paused"}</span>
+      </div>
+      <div class="player-video-tools">
+        <button class="control-button player-fullscreen-button" data-player-action="fullscreen">
+          ${isPlayerFullscreen ? "Exit full screen" : "Full screen"}
+        </button>
       </div>
 
       <div class="player-overlay">
@@ -623,13 +649,15 @@ function renderPlayer(item) {
         <p>${item.description}</p>
         <p class="player-subtitle" id="player-subtitle">${item.genres.join(" / ")} • Source: ${activeStream.name} • Language: ${activeStream.language}</p>
       </div>
-
-      <div class="player-progress">
-        <div class="progress-meta" id="progress-meta">${formatPlaybackTime(item)}</div>
-        <div class="progress-bar">
-          <div class="progress-value" id="progress-value" style="width: ${Math.round(playbackPercent)}%"></div>
-        </div>
-      </div>
+      <button
+        class="control-button player-fullscreen-mini"
+        id="toggle-fullscreen-mini"
+        data-player-action="fullscreen"
+        aria-label="${isPlayerFullscreen ? "Exit fullscreen" : "Enter fullscreen"}"
+        title="${isPlayerFullscreen ? "Exit fullscreen" : "Enter fullscreen"}"
+      >
+        <span aria-hidden="true">&#x26F6;</span>
+      </button>
     </div>
   `;
 
@@ -646,6 +674,7 @@ function renderPlayer(item) {
         <button class="control-button" data-player-action="rewind">-10s</button>
         <button class="control-button" data-player-action="toggle" id="toggle-playback">${isPlaying ? "Pause" : "Play"}</button>
         <button class="control-button" data-player-action="forward">+30s</button>
+        <button class="control-button" data-player-action="fullscreen" id="toggle-fullscreen">${isPlayerFullscreen ? "Exit full screen" : "Full screen"}</button>
       </div>
     </article>
 
@@ -722,7 +751,12 @@ function renderHandoffPlayer(item, stream) {
 }
 
 function bindPlayerActions(item) {
-  playerDetailsEl.querySelectorAll("[data-player-action]").forEach((button) => {
+  const actionButtons = [
+    ...playerDetailsEl.querySelectorAll("[data-player-action]"),
+    ...playerStageEl.querySelectorAll("[data-player-action]"),
+  ];
+
+  actionButtons.forEach((button) => {
     button.addEventListener("click", () => {
       handlePlayerAction(button.dataset.playerAction, item);
     });
@@ -738,6 +772,8 @@ function handlePlayerAction(action, item) {
     seekPlayer(30);
   } else if (action === "restart") {
     seekPlayerTo(0);
+  } else if (action === "fullscreen") {
+    void toggleFullscreen();
   } else if (action === "next-source" && selectedStreams.length > 0) {
     const resumeAt = getCurrentPlaybackSeconds();
     const shouldResume = isPlaying;
@@ -1855,9 +1891,11 @@ function syncPlayerUi(item, stream) {
   const videoScreen = playerStageEl.querySelector(".player-screen.is-video");
   const statusBadge = document.querySelector("#player-status-badge");
   const subtitle = document.querySelector("#player-subtitle");
-  const progressMeta = document.querySelector("#progress-meta");
-  const progressValue = document.querySelector("#progress-value");
   const toggleButton = document.querySelector("#toggle-playback");
+  const fullscreenButtons = [
+    ...playerDetailsEl.querySelectorAll("[data-player-action='fullscreen']"),
+    ...playerStageEl.querySelectorAll("[data-player-action='fullscreen']"),
+  ];
   const streamStatusMessage = document.querySelector("#stream-status-message");
 
   if (videoScreen) {
@@ -1872,17 +1910,19 @@ function syncPlayerUi(item, stream) {
     subtitle.textContent = `${item.genres.join(" / ")} • Source: ${stream.name} • Language: ${stream.language}`;
   }
 
-  if (progressMeta) {
-    progressMeta.textContent = formatPlaybackTime(item);
-  }
-
-  if (progressValue) {
-    progressValue.style.width = `${Math.round(playbackPercent)}%`;
-  }
-
   if (toggleButton) {
     toggleButton.textContent = isPlaybackStarting ? "Starting..." : isPlaying ? "Pause" : "Play";
   }
+
+  fullscreenButtons.forEach((button) => {
+    const isMiniButton = button.id === "toggle-fullscreen-mini";
+    const label = isPlayerFullscreen ? "Exit fullscreen" : "Enter fullscreen";
+    button.setAttribute("aria-label", label);
+    button.setAttribute("title", label);
+    if (!isMiniButton) {
+      button.textContent = isPlayerFullscreen ? "Exit full screen" : "Full screen";
+    }
+  });
 
   if (streamStatusMessage) {
     streamStatusMessage.textContent =
@@ -2038,6 +2078,57 @@ function getPlaybackBlockReason(stream) {
   }
 
   return "";
+}
+
+async function toggleFullscreen() {
+  if (currentPage !== "player" || !playerStageEl?.querySelector("#player-video")) {
+    return;
+  }
+
+  setPlayerFullscreen(!isPlayerFullscreen);
+}
+
+function tauriCurrentWindow() {
+  return window.__TAURI__?.window?.getCurrentWindow?.() ?? null;
+}
+
+async function toggleWindowMaximize() {
+  if (invoke) {
+    try {
+      await invoke("toggle_window_maximize");
+      return;
+    } catch (_error) {
+      // Fall through to API fallback.
+    }
+  }
+
+  const currentWindow = tauriCurrentWindow();
+  if (currentWindow?.isMaximized && currentWindow?.maximize && currentWindow?.unmaximize) {
+    try {
+      const maximized = await currentWindow.isMaximized();
+      if (maximized) {
+        await currentWindow.unmaximize();
+      } else {
+        await currentWindow.maximize();
+      }
+      return;
+    } catch (_error) {
+      // Fall through to element fullscreen when window API is unavailable in this runtime.
+    }
+  }
+
+  await toggleFullscreen();
+}
+
+function setPlayerFullscreen(nextState) {
+  isPlayerFullscreen = Boolean(nextState);
+  document.body.classList.toggle("is-player-fullscreen", isPlayerFullscreen);
+
+  const item = currentItem();
+  const stream = activeStreamForSelection();
+  if (item && stream) {
+    syncPlayerUi(item, stream);
+  }
 }
 
 async function openStreamExternally(stream, options = {}) {

@@ -152,6 +152,25 @@ fn open_external_url(url: String) -> Result<(), String> {
         .map_err(|error| format!("Could not open the source externally: {error}"))
 }
 
+#[tauri::command]
+fn toggle_window_maximize(window: tauri::WebviewWindow) -> Result<(), String> {
+    let is_maximized = window
+        .is_maximized()
+        .map_err(|error| format!("Could not check window state: {error}"))?;
+
+    if is_maximized {
+        window
+            .unmaximize()
+            .map_err(|error| format!("Could not restore window: {error}"))?;
+    } else {
+        window
+            .maximize()
+            .map_err(|error| format!("Could not maximize window: {error}"))?;
+    }
+
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::demo())
@@ -175,7 +194,8 @@ pub fn run() {
             get_streams,
             submit_torbox_magnet,
             search_sources,
-            open_external_url
+            open_external_url,
+            toggle_window_maximize
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Sol desktop application");
