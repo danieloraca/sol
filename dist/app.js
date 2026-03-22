@@ -13,6 +13,8 @@ const searchFeedbackEl = document.querySelector("#search-feedback");
 const mainViewEl = document.querySelector("#main-view");
 const searchViewEl = document.querySelector("#search-view");
 const searchBackEl = document.querySelector("#search-back");
+const playerViewEl = document.querySelector("#player-view");
+const playerBackEl = document.querySelector("#player-back");
 const searchResultsEl = document.querySelector("#search-results");
 const searchResultsTitleEl = document.querySelector("#search-results-title");
 const searchResultsSummaryEl = document.querySelector("#search-results-summary");
@@ -58,6 +60,8 @@ let manualSourceToolsVisible = false;
 let autoPlayTrace = null;
 let lastExecutedSearch = "";
 let isSearchViewActive = false;
+let currentPage = "main";
+let playerReturnPage = "main";
 
 async function bootstrap() {
   if (!invoke) {
@@ -81,6 +85,13 @@ async function bootstrap() {
     await runSearch();
   });
   searchBackEl?.addEventListener("click", () => {
+    showMainView();
+  });
+  playerBackEl?.addEventListener("click", () => {
+    if (playerReturnPage === "search") {
+      showSearchView();
+      return;
+    }
     showMainView();
   });
   filterButtons.forEach((button) => {
@@ -453,34 +464,55 @@ function bindSearchResultButtons() {
   searchResultsEl.querySelectorAll("[data-id]").forEach((button) => {
     button.addEventListener("click", async () => {
       const id = button.dataset.id;
-      showMainView();
+      showPlayerView({ returnTo: "search" });
       await selectItem(id);
     });
   });
 }
 
 function showSearchView() {
-  if (!mainViewEl || !searchViewEl) {
+  if (!mainViewEl || !searchViewEl || !playerViewEl) {
     return;
   }
+  currentPage = "search";
   isSearchViewActive = true;
   mainViewEl.classList.add("is-hidden");
+  playerViewEl.classList.add("is-hidden");
   searchViewEl.classList.remove("is-hidden");
+  window.scrollTo(0, 0);
 }
 
 function showMainView() {
-  if (!mainViewEl || !searchViewEl) {
+  if (!mainViewEl || !searchViewEl || !playerViewEl) {
     return;
   }
+  currentPage = "main";
   isSearchViewActive = false;
   searchViewEl.classList.add("is-hidden");
+  playerViewEl.classList.add("is-hidden");
   mainViewEl.classList.remove("is-hidden");
+  window.scrollTo(0, 0);
+}
+
+function showPlayerView(options = {}) {
+  if (!mainViewEl || !searchViewEl || !playerViewEl) {
+    return;
+  }
+  const { returnTo = currentPage === "search" ? "search" : "main" } = options;
+  playerReturnPage = returnTo;
+  currentPage = "player";
+  isSearchViewActive = false;
+  mainViewEl.classList.add("is-hidden");
+  searchViewEl.classList.add("is-hidden");
+  playerViewEl.classList.remove("is-hidden");
+  window.scrollTo(0, 0);
 }
 
 function bindCatalogButtons(scope) {
   scope.querySelectorAll("[data-id]").forEach((button) => {
     button.addEventListener("click", async () => {
       const id = button.dataset.id;
+      showPlayerView({ returnTo: currentPage === "search" ? "search" : "main" });
       await selectItem(id);
     });
   });
@@ -490,6 +522,7 @@ function bindHeroButtons() {
   heroEl.querySelectorAll("[data-play-hero], [data-open-hero]").forEach((button) => {
     button.addEventListener("click", async () => {
       const id = button.dataset.playHero ?? button.dataset.openHero;
+      showPlayerView({ returnTo: "main" });
       await selectItem(id, { autoPlay: Boolean(button.dataset.playHero) });
     });
   });

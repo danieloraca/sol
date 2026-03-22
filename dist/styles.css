@@ -171,6 +171,7 @@ body {
   padding: 28px;
   display: grid;
   gap: 24px;
+  align-content: start;
 }
 
 .main-view {
@@ -183,7 +184,20 @@ body {
   gap: 14px;
 }
 
+.player-view {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
 .search-view-heading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 0;
+}
+
+.player-view-heading {
   display: flex;
   gap: 12px;
   align-items: center;

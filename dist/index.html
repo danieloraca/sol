@@ -64,22 +64,6 @@
         <div id="main-view" class="main-view">
           <section class="hero" id="hero"></section>
 
-          <section class="player-shell">
-            <div class="player-stage" id="player-stage"></div>
-
-            <aside class="player-sidebar">
-              <div class="section-heading">
-                <p class="eyebrow">Playback</p>
-                <h2>Player controls</h2>
-              </div>
-
-              <div id="player-details" class="player-details"></div>
-              <div id="streams" class="streams empty">
-                Select a title to inspect its stream sources.
-              </div>
-            </aside>
-          </section>
-
           <section>
             <div class="section-heading">
               <p class="eyebrow">Home feed</p>
@@ -115,6 +99,27 @@
           </div>
           <p id="search-results-summary" class="meta"></p>
           <div id="search-results" class="catalog-grid"></div>
+        </section>
+
+        <section id="player-view" class="player-view is-hidden" aria-live="polite">
+          <div class="section-heading player-view-heading">
+            <button id="player-back" class="ghost-button" type="button">Back</button>
+            <div>
+              <p class="eyebrow">Playback</p>
+              <h2>Player controls</h2>
+            </div>
+          </div>
+
+          <section class="player-shell">
+            <div class="player-stage" id="player-stage"></div>
+
+            <aside class="player-sidebar">
+              <div id="player-details" class="player-details"></div>
+              <div id="streams" class="streams empty">
+                Select a title to inspect its stream sources.
+              </div>
+            </aside>
+          </section>
         </section>
       </main>
     </div>
