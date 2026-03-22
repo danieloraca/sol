@@ -519,7 +519,7 @@ function renderPlayer(item) {
         <div class="player-art ${heroArtworkUrl(item) ? "" : "is-fallback"}">
           ${renderArtworkImage(item, "player-poster")}
         </div>
-        <video id="player-video" class="player-video" preload="metadata" playsinline crossorigin="anonymous" ${escapedPoster} ${escapedVideoUrl}></video>
+        <video id="player-video" class="player-video" preload="metadata" playsinline ${escapedPoster} ${escapedVideoUrl}></video>
       </div>
       <div class="player-badges">
         <span class="badge">${item.media_type}</span>
