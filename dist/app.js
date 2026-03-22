@@ -410,12 +410,6 @@ async function runSearch(rawQuery = searchEl?.value ?? "") {
     return;
   }
 
-  if (query === lastExecutedSearch) {
-    setSearchFeedback(`Showing previous results for "${query}".`);
-    showSearchView();
-    return;
-  }
-
   setSearchFeedback(`Searching for "${query}"...`);
   let items = await invoke("search_catalog", { query });
   if (items.length === 0 && catalogItemsCache.length > 0) {
