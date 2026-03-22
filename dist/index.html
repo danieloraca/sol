@@ -61,46 +61,60 @@
       </aside>
 
       <main class="content">
-        <section class="hero" id="hero"></section>
+        <div id="main-view" class="main-view">
+          <section class="hero" id="hero"></section>
 
-        <section class="player-shell">
-          <div class="player-stage" id="player-stage"></div>
+          <section class="player-shell">
+            <div class="player-stage" id="player-stage"></div>
 
-          <aside class="player-sidebar">
+            <aside class="player-sidebar">
+              <div class="section-heading">
+                <p class="eyebrow">Playback</p>
+                <h2>Player controls</h2>
+              </div>
+
+              <div id="player-details" class="player-details"></div>
+              <div id="streams" class="streams empty">
+                Select a title to inspect its stream sources.
+              </div>
+            </aside>
+          </section>
+
+          <section>
             <div class="section-heading">
-              <p class="eyebrow">Playback</p>
-              <h2>Player controls</h2>
+              <p class="eyebrow">Home feed</p>
+              <h2>Trending now</h2>
             </div>
+            <div id="trending" class="rail"></div>
+          </section>
 
-            <div id="player-details" class="player-details"></div>
-            <div id="streams" class="streams empty">
-              Select a title to inspect its stream sources.
+          <section>
+            <div class="section-heading">
+              <p class="eyebrow">Resume</p>
+              <h2>Continue watching</h2>
             </div>
-          </aside>
-        </section>
+            <div id="continue-watching" class="rail"></div>
+          </section>
 
-        <section>
-          <div class="section-heading">
-            <p class="eyebrow">Home feed</p>
-            <h2>Trending now</h2>
-          </div>
-          <div id="trending" class="rail"></div>
-        </section>
+          <section>
+            <div class="section-heading">
+              <p class="eyebrow">Catalog</p>
+              <h2>Browse library</h2>
+            </div>
+            <div id="catalog" class="catalog-grid"></div>
+          </section>
+        </div>
 
-        <section>
-          <div class="section-heading">
-            <p class="eyebrow">Resume</p>
-            <h2>Continue watching</h2>
+        <section id="search-view" class="search-view is-hidden" aria-live="polite">
+          <div class="section-heading search-view-heading">
+            <button id="search-back" class="ghost-button" type="button">Back</button>
+            <div>
+              <p class="eyebrow">Search</p>
+              <h2 id="search-results-title">Results</h2>
+            </div>
           </div>
-          <div id="continue-watching" class="rail"></div>
-        </section>
-
-        <section>
-          <div class="section-heading">
-            <p class="eyebrow">Catalog</p>
-            <h2>Browse library</h2>
-          </div>
-          <div id="catalog" class="catalog-grid"></div>
+          <p id="search-results-summary" class="meta"></p>
+          <div id="search-results" class="catalog-grid"></div>
         </section>
       </main>
     </div>

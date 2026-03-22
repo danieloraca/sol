@@ -173,6 +173,27 @@ body {
   gap: 24px;
 }
 
+.main-view {
+  display: grid;
+  gap: 24px;
+}
+
+.search-view {
+  display: grid;
+  gap: 14px;
+}
+
+.search-view-heading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 0;
+}
+
+.is-hidden {
+  display: none;
+}
+
 .addon-manager {
   display: grid;
   gap: 12px;

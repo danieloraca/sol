@@ -10,6 +10,12 @@ const streamsEl = document.querySelector("#streams");
 const searchEl = document.querySelector("#search");
 const searchButtonEl = document.querySelector("#search-button");
 const searchFeedbackEl = document.querySelector("#search-feedback");
+const mainViewEl = document.querySelector("#main-view");
+const searchViewEl = document.querySelector("#search-view");
+const searchBackEl = document.querySelector("#search-back");
+const searchResultsEl = document.querySelector("#search-results");
+const searchResultsTitleEl = document.querySelector("#search-results-title");
+const searchResultsSummaryEl = document.querySelector("#search-results-summary");
 const addonUrlEl = document.querySelector("#addon-url");
 const installAddonButtonEl = document.querySelector("#install-addon");
 const addonFeedbackEl = document.querySelector("#addon-feedback");
@@ -51,6 +57,7 @@ let autoPlayPending = false;
 let manualSourceToolsVisible = false;
 let autoPlayTrace = null;
 let lastExecutedSearch = "";
+let isSearchViewActive = false;
 
 async function bootstrap() {
   if (!invoke) {
@@ -73,6 +80,9 @@ async function bootstrap() {
   searchButtonEl?.addEventListener("click", async () => {
     await runSearch();
   });
+  searchBackEl?.addEventListener("click", () => {
+    showMainView();
+  });
   filterButtons.forEach((button) => {
     button.addEventListener("click", async () => {
       activeFilter = button.dataset.filter ?? "";
@@ -80,6 +90,7 @@ async function bootstrap() {
       searchEl.value = "";
       lastExecutedSearch = "";
       setSearchFeedback("");
+      showMainView();
       await renderCatalog();
     });
   });
@@ -341,7 +352,9 @@ async function handleSearch(event) {
   const query = (event.target.value || "").trim();
   if (!query) {
     setSearchFeedback("");
-    await renderCatalog();
+    if (isSearchViewActive) {
+      showMainView();
+    }
     return;
   }
 
@@ -352,12 +365,13 @@ async function runSearch(rawQuery = searchEl?.value ?? "") {
   const query = rawQuery.trim();
   if (!query) {
     setSearchFeedback("");
-    await renderCatalog();
+    showMainView();
     return;
   }
 
   if (query === lastExecutedSearch) {
     setSearchFeedback(`Showing previous results for "${query}".`);
+    showSearchView();
     return;
   }
 
@@ -375,20 +389,15 @@ async function runSearch(rawQuery = searchEl?.value ?? "") {
   if (filtered.length === 0) {
     lastExecutedSearch = query;
     setSearchFeedback(`No matches for "${query}".`);
-    renderCatalogEmpty(`No results for "${query}".`);
+    renderSearchEmpty(query);
+    showSearchView();
     return;
   }
 
   lastExecutedSearch = query;
   setSearchFeedback(`${filtered.length} match${filtered.length === 1 ? "" : "es"} for "${query}".`);
-  catalogEl.innerHTML = filtered.map(renderCard).join("");
-  bindCatalogButtons(catalogEl);
-
-  // Make search feel immediate in the main player panel too.
-  const firstMatch = filtered[0];
-  if (firstMatch && firstMatch.id !== selectedItemId) {
-    await selectItem(firstMatch.id);
-  }
+  renderSearchResults(query, filtered);
+  showSearchView();
 }
 
 function setSearchFeedback(message) {
@@ -419,6 +428,53 @@ function renderCatalogEmpty(message) {
       <p>${escapeHtml(message)}</p>
     </article>
   `;
+}
+
+function renderSearchResults(query, items) {
+  searchResultsTitleEl.textContent = `Results for "${query}"`;
+  searchResultsSummaryEl.textContent = `${items.length} match${items.length === 1 ? "" : "es"}.`;
+  searchResultsEl.innerHTML = items.map(renderCard).join("");
+  bindSearchResultButtons();
+}
+
+function renderSearchEmpty(query) {
+  searchResultsTitleEl.textContent = `Results for "${query}"`;
+  searchResultsSummaryEl.textContent = "No matches found.";
+  searchResultsEl.innerHTML = `
+    <article class="card catalog-empty">
+      <p class="eyebrow">Search</p>
+      <h3>No matches</h3>
+      <p>No results for "${escapeHtml(query)}".</p>
+    </article>
+  `;
+}
+
+function bindSearchResultButtons() {
+  searchResultsEl.querySelectorAll("[data-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.dataset.id;
+      showMainView();
+      await selectItem(id);
+    });
+  });
+}
+
+function showSearchView() {
+  if (!mainViewEl || !searchViewEl) {
+    return;
+  }
+  isSearchViewActive = true;
+  mainViewEl.classList.add("is-hidden");
+  searchViewEl.classList.remove("is-hidden");
+}
+
+function showMainView() {
+  if (!mainViewEl || !searchViewEl) {
+    return;
+  }
+  isSearchViewActive = false;
+  searchViewEl.classList.add("is-hidden");
+  mainViewEl.classList.remove("is-hidden");
 }
 
 function bindCatalogButtons(scope) {
