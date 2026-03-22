@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::{
     addons::MoveDirection,
     domain::{
-        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, MediaType, SourceSearchResult,
-        StreamLookup, StreamSource,
+        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, MediaType, StreamLookup,
+        StreamSource,
     },
     services::AppServices,
 };
@@ -52,10 +52,6 @@ impl AppState {
         only_if_cached: bool,
     ) -> Option<AcquisitionResult> {
         self.services.submit_torbox_magnet(id, magnet, only_if_cached)
-    }
-
-    pub fn search_sources(&self, id: &str) -> Option<SourceSearchResult> {
-        self.services.search_sources(id)
     }
 
     pub fn addons(&self) -> Vec<AddonDescriptor> {

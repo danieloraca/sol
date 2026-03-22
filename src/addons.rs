@@ -9,8 +9,8 @@ use crate::{
         SourceRelease, SourceSearchResult, StreamCandidate, StreamLookup, StreamSource,
     },
     providers::{
-        MetadataProvider, ProwlarrSourceProvider, SeededLibraryProvider, SourceSearchProvider,
-        StreamProvider, TmdbMetadataProvider, TorboxStreamProvider,
+        MetadataProvider, SeededLibraryProvider, StreamProvider, TmdbMetadataProvider,
+        TorboxStreamProvider,
     },
 };
 
@@ -71,7 +71,6 @@ impl AddonRegistry {
 
         addons.push(Arc::new(TmdbMetadataAddon::new()) as Arc<dyn SolAddon>);
         addons.push(Arc::new(TorboxStreamAddon::new()) as Arc<dyn SolAddon>);
-        addons.push(Arc::new(ProwlarrSearchAddon::new()) as Arc<dyn SolAddon>);
         addons.push(Arc::new(DemoCatalogAddon::new()) as Arc<dyn SolAddon>);
 
         addons.retain(|addon| !addon.descriptor().id.is_empty());
@@ -640,47 +639,6 @@ impl SolAddon for TorboxStreamAddon {
         only_if_cached: bool,
     ) -> Option<AcquisitionResult> {
         Some(self.provider.submit_magnet(item, magnet, only_if_cached))
-    }
-}
-
-struct ProwlarrSearchAddon {
-    provider: ProwlarrSourceProvider,
-}
-
-impl ProwlarrSearchAddon {
-    fn new() -> Self {
-        Self {
-            provider: ProwlarrSourceProvider::from_env(),
-        }
-    }
-}
-
-impl SolAddon for ProwlarrSearchAddon {
-    fn descriptor(&self) -> AddonDescriptor {
-        AddonDescriptor {
-            id: "builtin.prowlarr".into(),
-            name: "Prowlarr Search".into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-            transport: AddonTransport::Builtin,
-            enabled: true,
-            configured: self.provider.is_configured(),
-            health_status: if self.provider.is_configured() {
-                "healthy".into()
-            } else {
-                "setup_required".into()
-            },
-            health_message: if self.provider.is_configured() {
-                "Prowlarr URL and API key detected. Source search is available.".into()
-            } else {
-                "Set PROWLARR_URL and PROWLARR_API_KEY to search releases automatically.".into()
-            },
-            capabilities: vec!["source_search".into()],
-            source: "env:PROWLARR_URL|PROWLARR_API_KEY".into(),
-        }
-    }
-
-    fn source_search(&self, item: &MediaItem) -> Option<SourceSearchResult> {
-        self.provider.is_configured().then(|| self.provider.search(item))
     }
 }
 

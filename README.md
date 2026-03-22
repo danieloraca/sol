@@ -53,7 +53,6 @@ Today the builtin addon registry includes:
 - `Demo Catalog` for seeded catalog and fallback streams
 - `TMDB Metadata` when `TMDB_API_READ_TOKEN` or `TMDB_API_KEY` is set
 - `TorBox Streams` when `TORBOX_API_KEY` is set
-- `Prowlarr Search` when `PROWLARR_URL` and `PROWLARR_API_KEY` are set
 
 ## Environment variables
 
@@ -75,13 +74,6 @@ Optional for the next stream step:
 export TORBOX_API_KEY=your_torbox_api_key
 ```
 
-Optional for automatic source discovery:
-
-```bash
-export PROWLARR_URL=http://127.0.0.1:9696
-export PROWLARR_API_KEY=your_prowlarr_api_key
-```
-
 ## Current addon behavior
 
 For TMDB-backed movie items, the builtin addons now:
@@ -99,8 +91,6 @@ When a title still has no stream, the desktop app now also lets you:
 2. Send it directly to TorBox.
 3. Keep the action in cached-only mode by default, or turn that off if you explicitly want TorBox to queue the torrent.
 4. Refresh the lookup and try playback again once TorBox has the item ready.
-
-If Prowlarr is configured, the app also searches release candidates automatically for no-stream titles and lets you send one straight to TorBox from the UI.
 
 You can inspect the current addon registry through:
 

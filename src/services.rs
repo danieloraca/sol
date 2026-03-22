@@ -3,8 +3,8 @@ use std::sync::{Arc, RwLock};
 use crate::{
     addons::{AddonRegistry, AddonStore, MoveDirection, RemoteHttpAddon, SolAddon},
     domain::{
-        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, MediaType, SourceSearchResult,
-        StreamLookup, StreamSource,
+        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, MediaType, StreamLookup,
+        StreamSource,
     },
 };
 
@@ -79,12 +79,6 @@ impl AppServices {
         let registry = self.addons.read().expect("addon registry read lock");
         let item = registry.item(id)?;
         Some(registry.submit_magnet(&item, magnet, only_if_cached))
-    }
-
-    pub fn search_sources(&self, id: &str) -> Option<SourceSearchResult> {
-        let registry = self.addons.read().expect("addon registry read lock");
-        let item = registry.item(id)?;
-        Some(registry.source_search(&item))
     }
 
     pub fn addons(&self) -> Vec<AddonDescriptor> {

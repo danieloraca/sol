@@ -52,7 +52,6 @@ let torboxDraftMagnet = "";
 let torboxCachedOnly = true;
 let torboxAutoRefreshTimer = null;
 let torboxAutoRefreshAttempt = 0;
-let sourceSearchState = null;
 let installedAddons = [];
 let selectedAddonSource = null;
 let autoPlayPending = false;
@@ -570,7 +569,6 @@ async function selectItem(id, options = {}) {
       torboxSubmissionState = null;
       torboxDraftMagnet = "";
       torboxCachedOnly = true;
-      sourceSearchState = null;
       manualSourceToolsVisible = false;
       autoPlayTrace = null;
     }
@@ -595,9 +593,6 @@ async function selectItem(id, options = {}) {
     } else {
       setPlaybackState(false);
       renderNoStreams(item, selectedLookup);
-      if (showAutomaticSourceActions()) {
-        void ensureSourceSearch(id);
-      }
       if (autoPlay) {
         await attemptAutoPlay(item);
       }
@@ -1050,16 +1045,6 @@ function renderNoStreams(item, lookup) {
   const acquisitionPending = torboxSubmissionState?.pending ?? false;
   const showAutoPlayTools = showAutomaticSourceActions();
   const showTorboxActions = showAutoPlayTools && manualSourceToolsVisible;
-  const sourceSearch = sourceSearchState?.itemId === item.id
-    ? sourceSearchState
-    : {
-        itemId: item.id,
-        provider: "Addons",
-        status: "idle",
-        message: "Sol can try to find a source automatically when you press Play.",
-        releases: [],
-        pending: false,
-      };
   const traceSteps = autoPlayTrace?.itemId === item.id ? autoPlayTrace.steps : [];
 
   playerStageEl.innerHTML = `
@@ -1097,7 +1082,7 @@ function renderNoStreams(item, lookup) {
         <button class="control-button" data-no-stream-action="play">Play</button>
         <button class="control-button" data-no-stream-action="forward" disabled>+30s</button>
       </div>
-      <p class="meta">Play will try automatic source search when no direct stream is available.</p>
+      <p class="meta">Play will try addon/TorBox source candidates when no direct stream is available.</p>
     </article>
 
     <article class="player-details-card">
@@ -1110,10 +1095,7 @@ function renderNoStreams(item, lookup) {
         ? `
           <article class="player-details-card">
             <p class="eyebrow">Autoplay</p>
-            <p class="meta">Press Play and Sol will try direct streams first, then automatic source search and TorBox handoff.</p>
-            <div class="provider-badge-row">
-              <span class="provider-badge ${sourceSearchBadgeClass(sourceSearch)}">${escapeHtml(sourceSearchBadgeLabel(sourceSearch))}</span>
-            </div>
+            <p class="meta">Press Play and Sol will try direct streams first, then TorBox candidate handoff.</p>
             <div class="control-buttons">
               <button class="primary-button" id="autoplay-source" ${acquisitionPending || autoPlayPending ? "disabled" : ""}>
                 Play
@@ -1203,44 +1185,6 @@ function renderNoStreams(item, lookup) {
         `
         : `<p class="stream-meta">No close matches were found in your current TorBox library.</p>`
     }
-    ${
-      showTorboxActions
-        ? `
-          <div class="source-search-block">
-            <p class="eyebrow">Source search</p>
-            <h3>${escapeHtml(sourceSearch.provider ?? "Prowlarr")}</h3>
-            <p class="stream-meta">${escapeHtml(sourceSearch.message ?? "Search for releases to add.")}</p>
-            <div class="control-buttons">
-              <button class="ghost-button" id="source-search-refresh" ${sourceSearch.pending ? "disabled" : ""}>
-                ${sourceSearch.pending ? "Searching..." : "Search again"}
-              </button>
-            </div>
-            ${
-              (sourceSearch.releases ?? []).length > 0
-                ? `
-                  <div class="stream-list">
-                    ${sourceSearch.releases
-                      .map(
-                        (release, index) => `
-                          <article class="stream-card">
-                            <h3>${escapeHtml(release.title)}</h3>
-                            <p class="stream-meta">${escapeHtml(release.indexer)} • ${escapeHtml(release.protocol)} • ${escapeHtml(release.quality)}</p>
-                            <p class="stream-meta">${escapeHtml(release.size)} • ${escapeHtml(release.seeders)} seeders • ${escapeHtml(release.age)}</p>
-                            <button class="stream-button" data-source-index="${index}">
-                              Send to TorBox
-                            </button>
-                          </article>
-                        `,
-                      )
-                      .join("")}
-                  </div>
-                `
-                : ""
-            }
-          </div>
-        `
-        : ""
-    }
   `;
 
   bindNoStreamActions(item, showTorboxActions);
@@ -1270,7 +1214,6 @@ function bindNoStreamActions(item, showTorboxActions) {
 
   const submitButton = document.querySelector("#torbox-submit-source");
   const refreshButton = document.querySelector("#torbox-refresh-lookup");
-  const searchAgainButton = document.querySelector("#source-search-refresh");
   const magnetField = document.querySelector("#torbox-magnet");
   const cachedOnlyField = document.querySelector("#torbox-only-cached");
 
@@ -1331,150 +1274,6 @@ function bindNoStreamActions(item, showTorboxActions) {
       renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
     }
   });
-
-  searchAgainButton?.addEventListener("click", async () => {
-    await ensureSourceSearch(item.id, { force: true });
-  });
-
-  streamsEl.querySelectorAll("[data-source-index]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const index = Number(button.dataset.sourceIndex);
-      const release = sourceSearchState?.releases?.[index];
-      if (!release?.magnet_url) {
-        return;
-      }
-
-      torboxDraftMagnet = release.magnet_url;
-      torboxSubmissionState = {
-        pending: true,
-        status: "pending",
-        message: `Sending "${release.title}" to TorBox...`,
-      };
-      renderNoStreams(item, selectedLookup);
-
-      try {
-        const result = await invoke("submit_torbox_magnet", {
-          id: item.id,
-          magnet: release.magnet_url,
-          onlyIfCached: torboxCachedOnly,
-        });
-
-        torboxSubmissionState = {
-          pending: false,
-          status: result.status,
-          message: result.message,
-        };
-
-        await selectItem(item.id);
-        if (selectedStreams.length === 0) {
-          startTorboxAutoRefresh(item.id, { autoPlay: true });
-          renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);
-        }
-      } catch (error) {
-        stopTorboxAutoRefresh();
-        torboxSubmissionState = {
-          pending: false,
-          status: "error",
-          message: String(error),
-        };
-        renderNoStreams(item, selectedLookup);
-      }
-    });
-  });
-}
-
-async function ensureSourceSearch(itemId, options = {}) {
-  const { force = false } = options;
-  if (selectedItemId !== itemId) {
-    return;
-  }
-
-  if (
-    !force &&
-    sourceSearchState?.itemId === itemId &&
-    (sourceSearchState.pending || sourceSearchState.status === "ready" || sourceSearchState.status === "no_results")
-  ) {
-    return;
-  }
-
-  sourceSearchState = {
-    itemId,
-    provider: "Addons",
-    status: "searching",
-    message: "Searching addons for release candidates...",
-    releases: [],
-    pending: true,
-  };
-
-  const item = itemCache.get(itemId);
-  if (item && selectedStreams.length === 0) {
-    renderNoStreams(item, selectedLookup);
-  }
-
-  try {
-    const result = await invoke("search_sources", { id: itemId });
-    if (selectedItemId !== itemId) {
-      return;
-    }
-
-    sourceSearchState = {
-      itemId,
-      ...result,
-      pending: false,
-    };
-  } catch (error) {
-    if (selectedItemId !== itemId) {
-      return;
-    }
-
-    sourceSearchState = {
-      itemId,
-      provider: "Addons",
-      status: "error",
-      message: String(error),
-      releases: [],
-      pending: false,
-    };
-  }
-
-  const currentItem = itemCache.get(itemId);
-  if (currentItem && selectedItemId === itemId && selectedStreams.length === 0) {
-    renderNoStreams(currentItem, selectedLookup);
-  }
-}
-
-function sourceSearchBadgeLabel(sourceSearch) {
-  switch (sourceSearch.status) {
-    case "searching":
-      return "Searching sources";
-    case "ready":
-      return `Sources ready • ${sourceSearch.releases.length} results`;
-    case "no_results":
-      return "No addon sources";
-    case "unavailable":
-      return "Auto search unavailable";
-    case "request_failed":
-    case "error":
-      return "Source search issue";
-    default:
-      return "Auto search idle";
-  }
-}
-
-function sourceSearchBadgeClass(sourceSearch) {
-  switch (sourceSearch.status) {
-    case "ready":
-    case "no_results":
-      return "is-success";
-    case "searching":
-      return "is-pending";
-    case "unavailable":
-    case "request_failed":
-    case "error":
-      return "is-error";
-    default:
-      return "is-neutral";
-  }
 }
 
 function resetAutoPlayTrace(itemId) {
@@ -1615,14 +1414,7 @@ async function attemptAutoPlay(item, options = {}) {
     let release = lookupCandidates[0] ?? null;
 
     if (!release) {
-      pushAutoPlayTrace(item.id, "No addable candidates in the current stream lookup. Searching source providers.", "pending");
-      await ensureSourceSearch(item.id, { force: true });
-      release = sourceSearchState?.itemId === item.id ? sourceSearchState.releases?.[0] : null;
-      if (release) {
-        pushAutoPlayTrace(item.id, `Found ${sourceSearchState.releases.length} automatic source candidate(s).`, "success");
-      } else {
-        pushAutoPlayTrace(item.id, sourceSearchState?.message || "No automatic source candidates found.", "error");
-      }
+      pushAutoPlayTrace(item.id, "No addable source candidates were returned for this title.", "error");
     } else {
       pushAutoPlayTrace(item.id, `Found an addon-provided source candidate: ${release.name || release.title}.`, "success");
     }
@@ -1631,7 +1423,7 @@ async function attemptAutoPlay(item, options = {}) {
       torboxSubmissionState = {
         pending: false,
         status: "auto_unavailable",
-        message: sourceSearchState?.message || selectedLookup?.message || "Sol could not find an automatic source for this title yet.",
+        message: selectedLookup?.message || "Sol could not find an automatic source for this title yet.",
       };
       manualSourceToolsVisible = true;
       renderNoStreams(itemCache.get(item.id) ?? item, selectedLookup);

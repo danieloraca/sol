@@ -4,8 +4,7 @@ use std::process::Command;
 use crate::{
     addons::MoveDirection,
     domain::{
-        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, SourceSearchResult, StreamLookup,
-        StreamSource,
+        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, StreamLookup, StreamSource,
     },
     state::AppState,
 };
@@ -109,16 +108,6 @@ fn submit_torbox_magnet(
 }
 
 #[tauri::command]
-fn search_sources(
-    state: tauri::State<'_, AppState>,
-    id: String,
-) -> Result<SourceSearchResult, String> {
-    state
-        .search_sources(&id)
-        .ok_or_else(|| format!("No media item found for {id}"))
-}
-
-#[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
     let url = url.trim().to_string();
     if !(url.starts_with("http://") || url.starts_with("https://")) {
@@ -207,7 +196,6 @@ pub fn run() {
             get_stream_lookup,
             get_streams,
             submit_torbox_magnet,
-            search_sources,
             open_external_url,
             toggle_window_maximize,
             toggle_window_fullscreen
