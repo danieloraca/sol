@@ -567,6 +567,10 @@ body {
   pointer-events: none;
 }
 
+.player-screen.is-video.is-playing .player-overlay {
+  opacity: 0;
+}
+
 .player-badges,
 .hero-actions,
 .control-buttons,

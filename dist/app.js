@@ -603,7 +603,7 @@ function renderPlayer(item) {
   const escapedVideoUrl = activeStream.url ? `data-playback-url="${escapeHtml(activeStream.url)}"` : "";
 
   playerStageEl.innerHTML = `
-    <div class="player-screen is-video">
+    <div class="player-screen is-video ${isPlaying && !isPlaybackStarting ? "is-playing" : ""}">
       <div class="player-video-shell ${heroArtworkUrl(item) ? "" : "is-fallback"}">
         <div class="player-art ${heroArtworkUrl(item) ? "" : "is-fallback"}">
           ${renderArtworkImage(item, "player-poster")}
@@ -1048,6 +1048,16 @@ function renderNoStreams(item, lookup) {
     </article>
 
     <article class="player-details-card">
+      <p class="eyebrow">Playback controls</p>
+      <div class="control-row">
+        <button class="control-button" data-no-stream-action="rewind" disabled>-10s</button>
+        <button class="control-button" data-no-stream-action="play">Play</button>
+        <button class="control-button" data-no-stream-action="forward" disabled>+30s</button>
+      </div>
+      <p class="meta">Play will try automatic source search when no direct stream is available.</p>
+    </article>
+
+    <article class="player-details-card">
       <p class="eyebrow">Stream status</p>
       <p>${message}</p>
     </article>
@@ -1196,6 +1206,11 @@ function renderNoStreams(item, lookup) {
 function bindNoStreamActions(item, showTorboxActions) {
   const autoplayButton = document.querySelector("#autoplay-source");
   const toggleManualButton = document.querySelector("#toggle-manual-source-tools");
+  const noStreamPlayButton = playerDetailsEl.querySelector("[data-no-stream-action='play']");
+
+  noStreamPlayButton?.addEventListener("click", async () => {
+    await attemptAutoPlay(item, { force: true });
+  });
 
   autoplayButton?.addEventListener("click", async () => {
     await attemptAutoPlay(item, { force: true });
@@ -1837,12 +1852,17 @@ function syncPlayerUi(item, stream) {
     return;
   }
 
+  const videoScreen = playerStageEl.querySelector(".player-screen.is-video");
   const statusBadge = document.querySelector("#player-status-badge");
   const subtitle = document.querySelector("#player-subtitle");
   const progressMeta = document.querySelector("#progress-meta");
   const progressValue = document.querySelector("#progress-value");
   const toggleButton = document.querySelector("#toggle-playback");
   const streamStatusMessage = document.querySelector("#stream-status-message");
+
+  if (videoScreen) {
+    videoScreen.classList.toggle("is-playing", isPlaying && !isPlaybackStarting);
+  }
 
   if (statusBadge) {
     statusBadge.textContent = playbackStatusLabel();
