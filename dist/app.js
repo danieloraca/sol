@@ -64,6 +64,8 @@ let currentPage = "main";
 let playerReturnPage = "main";
 let fullscreenListenerBound = false;
 let isPlayerFullscreen = false;
+let isNativeFullscreen = false;
+let fullscreenControlsTimer = null;
 
 async function bootstrap() {
   if (!invoke) {
@@ -129,6 +131,16 @@ async function bootstrap() {
   });
 
   if (!fullscreenListenerBound) {
+    document.addEventListener("mousemove", () => {
+      if (isPlayerFullscreen) {
+        showFullscreenControls();
+      }
+    });
+    document.addEventListener("touchstart", () => {
+      if (isPlayerFullscreen) {
+        showFullscreenControls();
+      }
+    }, { passive: true });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && isPlayerFullscreen) {
         setPlayerFullscreen(false);
@@ -2085,6 +2097,17 @@ async function toggleFullscreen() {
     return;
   }
 
+  if (invoke) {
+    try {
+      const nextState = await invoke("toggle_window_fullscreen");
+      isNativeFullscreen = Boolean(nextState);
+      setPlayerFullscreen(isNativeFullscreen);
+      return;
+    } catch (_error) {
+      // Fall back to in-app fullscreen mode if native fullscreen is unavailable.
+    }
+  }
+
   setPlayerFullscreen(!isPlayerFullscreen);
 }
 
@@ -2123,12 +2146,44 @@ async function toggleWindowMaximize() {
 function setPlayerFullscreen(nextState) {
   isPlayerFullscreen = Boolean(nextState);
   document.body.classList.toggle("is-player-fullscreen", isPlayerFullscreen);
+  document.body.classList.toggle("is-player-controls-visible", isPlayerFullscreen);
+
+  if (fullscreenControlsTimer) {
+    window.clearTimeout(fullscreenControlsTimer);
+    fullscreenControlsTimer = null;
+  }
+
+  if (isPlayerFullscreen) {
+    scheduleFullscreenControlsHide();
+  }
 
   const item = currentItem();
   const stream = activeStreamForSelection();
   if (item && stream) {
     syncPlayerUi(item, stream);
   }
+}
+
+function showFullscreenControls() {
+  document.body.classList.add("is-player-controls-visible");
+  scheduleFullscreenControlsHide();
+}
+
+function scheduleFullscreenControlsHide() {
+  if (!isPlayerFullscreen) {
+    return;
+  }
+
+  if (fullscreenControlsTimer) {
+    window.clearTimeout(fullscreenControlsTimer);
+  }
+
+  fullscreenControlsTimer = window.setTimeout(() => {
+    if (!isPlayerFullscreen) {
+      return;
+    }
+    document.body.classList.remove("is-player-controls-visible");
+  }, 1800);
 }
 
 async function openStreamExternally(stream, options = {}) {

@@ -85,6 +85,26 @@ body.is-player-fullscreen .player-fullscreen-mini {
   bottom: 18px;
 }
 
+body.is-player-fullscreen .player-badges,
+body.is-player-fullscreen .player-video-tools,
+body.is-player-fullscreen .player-fullscreen-mini {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+body.is-player-fullscreen.is-player-controls-visible .player-badges,
+body.is-player-fullscreen.is-player-controls-visible .player-video-tools,
+body.is-player-fullscreen.is-player-controls-visible .player-fullscreen-mini {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+body.is-player-fullscreen:not(.is-player-controls-visible) .player-stage,
+body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
+  cursor: none;
+}
+
 .shell {
   display: grid;
   grid-template-columns: 330px 1fr;

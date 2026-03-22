@@ -171,6 +171,20 @@ fn toggle_window_maximize(window: tauri::WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn toggle_window_fullscreen(window: tauri::WebviewWindow) -> Result<bool, String> {
+    let is_fullscreen = window
+        .is_fullscreen()
+        .map_err(|error| format!("Could not check fullscreen state: {error}"))?;
+    let next_state = !is_fullscreen;
+
+    window
+        .set_fullscreen(next_state)
+        .map_err(|error| format!("Could not change fullscreen state: {error}"))?;
+
+    Ok(next_state)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::demo())
@@ -195,7 +209,8 @@ pub fn run() {
             submit_torbox_magnet,
             search_sources,
             open_external_url,
-            toggle_window_maximize
+            toggle_window_maximize,
+            toggle_window_fullscreen
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Sol desktop application");
