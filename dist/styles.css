@@ -75,18 +75,12 @@ body.is-player-fullscreen .player-stage::before {
   border-radius: 0;
 }
 
-body.is-player-fullscreen .player-video-tools {
-  top: 18px;
-  right: 18px;
-}
-
 body.is-player-fullscreen .player-fullscreen-mini {
   right: 18px;
   bottom: 18px;
 }
 
 body.is-player-fullscreen .player-badges,
-body.is-player-fullscreen .player-video-tools,
 body.is-player-fullscreen .player-fullscreen-mini {
   opacity: 0;
   pointer-events: none;
@@ -94,7 +88,6 @@ body.is-player-fullscreen .player-fullscreen-mini {
 }
 
 body.is-player-fullscreen.is-player-controls-visible .player-badges,
-body.is-player-fullscreen.is-player-controls-visible .player-video-tools,
 body.is-player-fullscreen.is-player-controls-visible .player-fullscreen-mini {
   opacity: 1;
   pointer-events: auto;
@@ -659,18 +652,6 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 
 .player-screen.is-video.is-playing .player-overlay {
   opacity: 0;
-}
-
-.player-video-tools {
-  position: absolute;
-  top: 28px;
-  right: 28px;
-  z-index: 2;
-  pointer-events: auto;
-}
-
-.player-fullscreen-button {
-  min-width: 128px;
 }
 
 .player-fullscreen-mini {

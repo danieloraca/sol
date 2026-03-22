@@ -649,11 +649,6 @@ function renderPlayer(item) {
         <span class="badge">${activeStream.quality}</span>
         <span class="badge" id="player-status-badge">${isPlaying ? "Playing now" : "Paused"}</span>
       </div>
-      <div class="player-video-tools">
-        <button class="control-button player-fullscreen-button" data-player-action="fullscreen">
-          ${isPlayerFullscreen ? "Exit full screen" : "Full screen"}
-        </button>
-      </div>
 
       <div class="player-overlay">
         <p class="eyebrow">Player</p>
