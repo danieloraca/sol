@@ -74,11 +74,17 @@ async function bootstrap() {
     return;
   }
 
-  await renderHome();
-  await Promise.all([renderCatalog(), renderAddons()]);
-  if (homeFeed?.hero?.id) {
-    void selectItem(homeFeed.hero.id);
-  }
+  await Promise.all([renderHome(), renderCatalog()]);
+  window.requestAnimationFrame(() => {
+    void renderAddons().catch((error) => {
+      addonFeedbackEl.textContent = String(error);
+    });
+  });
+  window.requestAnimationFrame(() => {
+    if (homeFeed?.hero?.id) {
+      void selectItem(homeFeed.hero.id);
+    }
+  });
 
   searchEl.addEventListener("input", handleSearch);
   searchEl.addEventListener("keydown", async (event) => {

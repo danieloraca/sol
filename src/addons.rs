@@ -1,4 +1,11 @@
-use std::{collections::BTreeSet, fs, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::PathBuf,
+    sync::Arc,
+    thread,
+    time::{Duration, Instant},
+};
 
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -20,6 +27,7 @@ const REMOTE_CATALOG_LIMIT: usize = 10;
 const REMOTE_CATALOG_ITEM_LIMIT: usize = 240;
 const REMOTE_SEARCH_CATALOG_LIMIT: usize = 14;
 const REMOTE_SEARCH_ITEM_LIMIT: usize = 320;
+const ADDON_PERF_LOG_THRESHOLD_MS: u128 = 120;
 
 pub trait SolAddon: Send + Sync {
     fn descriptor(&self) -> AddonDescriptor;
@@ -90,11 +98,26 @@ impl AddonRegistry {
     }
 
     pub fn home_feed(&self) -> HomeFeed {
-        let feeds = self
-            .addons
-            .iter()
-            .filter_map(|addon| addon.home_feed())
-            .collect::<Vec<_>>();
+        let feeds = thread::scope(|scope| {
+            let handles = self
+                .addons
+                .iter()
+                .map(|addon| {
+                    let addon = Arc::clone(addon);
+                    scope.spawn(move || {
+                        let started = Instant::now();
+                        let feed = addon.home_feed();
+                        log_addon_timing("home_feed", &addon, started.elapsed());
+                        feed
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            handles
+                .into_iter()
+                .filter_map(|handle| handle.join().ok().flatten())
+                .collect::<Vec<_>>()
+        });
 
         let hero = feeds
             .iter()
@@ -130,35 +153,91 @@ impl AddonRegistry {
     }
 
     pub fn catalog(&self, media_type: Option<MediaType>) -> Vec<MediaItem> {
-        dedupe_media_items(
-            self.addons
+        let items = thread::scope(|scope| {
+            let handles = self
+                .addons
                 .iter()
-                .filter_map(|addon| addon.catalog(media_type.clone()))
+                .map(|addon| {
+                    let addon = Arc::clone(addon);
+                    let media_type = media_type.clone();
+                    scope.spawn(move || {
+                        let started = Instant::now();
+                        let addon_items = addon.catalog(media_type);
+                        log_addon_timing("catalog", &addon, started.elapsed());
+                        addon_items
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            handles
+                .into_iter()
+                .filter_map(|handle| handle.join().ok().flatten())
                 .flatten()
-                .collect(),
-        )
+                .collect::<Vec<_>>()
+        });
+        dedupe_media_items(items)
     }
 
     pub fn search(&self, query: &str) -> Vec<MediaItem> {
-        dedupe_media_items(
-            self.addons
+        let items = thread::scope(|scope| {
+            let handles = self
+                .addons
                 .iter()
-                .filter_map(|addon| addon.search(query))
+                .map(|addon| {
+                    let addon = Arc::clone(addon);
+                    let query = query.to_string();
+                    scope.spawn(move || {
+                        let started = Instant::now();
+                        let addon_items = addon.search(&query);
+                        log_addon_timing("search", &addon, started.elapsed());
+                        addon_items
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            handles
+                .into_iter()
+                .filter_map(|handle| handle.join().ok().flatten())
                 .flatten()
-                .collect(),
-        )
+                .collect::<Vec<_>>()
+        });
+        dedupe_media_items(items)
     }
 
     pub fn item(&self, id: &str) -> Option<MediaItem> {
-        self.addons.iter().find_map(|addon| addon.item(id))
+        for addon in &self.addons {
+            let started = Instant::now();
+            let item = addon.item(id);
+            log_addon_timing("item", addon, started.elapsed());
+            if item.is_some() {
+                return item;
+            }
+        }
+        None
     }
 
     pub fn stream_lookup(&self, item: &MediaItem) -> StreamLookup {
-        let lookups = self
-            .addons
-            .iter()
-            .filter_map(|addon| addon.stream_lookup(item))
-            .collect::<Vec<_>>();
+        let lookups = thread::scope(|scope| {
+            let handles = self
+                .addons
+                .iter()
+                .map(|addon| {
+                    let addon = Arc::clone(addon);
+                    let item = item.clone();
+                    scope.spawn(move || {
+                        let started = Instant::now();
+                        let lookup = addon.stream_lookup(&item);
+                        log_addon_timing("stream_lookup", &addon, started.elapsed());
+                        lookup
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            handles
+                .into_iter()
+                .filter_map(|handle| handle.join().ok().flatten())
+                .collect::<Vec<_>>()
+        });
 
         let streams = dedupe_stream_sources(
             lookups
@@ -1443,6 +1522,19 @@ fn remote_addon_priority(descriptor: &AddonDescriptor) -> u8 {
     } else {
         1
     }
+}
+
+fn log_addon_timing(operation: &str, addon: &Arc<dyn SolAddon>, elapsed: Duration) {
+    if elapsed.as_millis() < ADDON_PERF_LOG_THRESHOLD_MS {
+        return;
+    }
+    let descriptor = addon.descriptor();
+    eprintln!(
+        "[perf] addon.{operation} {} ({}) took {}ms",
+        descriptor.name,
+        descriptor.id,
+        elapsed.as_millis()
+    );
 }
 
 #[cfg(test)]

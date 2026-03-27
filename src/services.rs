@@ -1,4 +1,8 @@
-use std::sync::{Arc, RwLock};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+    time::{Duration, Instant},
+};
 
 use crate::{
     addons::{AddonRegistry, AddonStore, MoveDirection, RemoteHttpAddon, SolAddon},
@@ -11,7 +15,38 @@ use crate::{
 #[derive(Clone)]
 pub struct AppServices {
     addons: Arc<RwLock<AddonRegistry>>,
+    cache: Arc<RwLock<ServiceCache>>,
     store: AddonStore,
+}
+
+const HOME_FEED_TTL: Duration = Duration::from_secs(20);
+const CATALOG_TTL: Duration = Duration::from_secs(20);
+const SEARCH_TTL: Duration = Duration::from_secs(20);
+const STREAM_LOOKUP_TTL: Duration = Duration::from_secs(10);
+const PERF_LOG_THRESHOLD_MS: u128 = 120;
+const CACHE_MAX_ENTRIES: usize = 128;
+
+#[derive(Clone)]
+struct CacheEntry<T> {
+    value: T,
+    expires_at: Instant,
+}
+
+#[derive(Default)]
+struct ServiceCache {
+    home_feed: Option<CacheEntry<HomeFeed>>,
+    catalog: HashMap<String, CacheEntry<Vec<MediaItem>>>,
+    search: HashMap<String, CacheEntry<Vec<MediaItem>>>,
+    stream_lookup: HashMap<String, CacheEntry<StreamLookup>>,
+}
+
+impl ServiceCache {
+    fn clear(&mut self) {
+        self.home_feed = None;
+        self.catalog.clear();
+        self.search.clear();
+        self.stream_lookup.clear();
+    }
 }
 
 impl AppServices {
@@ -21,36 +56,115 @@ impl AppServices {
 
         Self {
             addons: Arc::new(RwLock::new(registry)),
+            cache: Arc::new(RwLock::new(ServiceCache::default())),
             store,
         }
     }
 
     pub fn home_feed(&self) -> HomeFeed {
-        self.addons.read().expect("addon registry read lock").home_feed()
+        let now = Instant::now();
+        if let Some(feed) = self
+            .cache
+            .read()
+            .expect("service cache read lock")
+            .home_feed
+            .as_ref()
+            .filter(|entry| entry.expires_at > now)
+            .map(|entry| entry.value.clone())
+        {
+            return feed;
+        }
+
+        let started = Instant::now();
+        let feed = self.addons.read().expect("addon registry read lock").home_feed();
+        self.cache
+            .write()
+            .expect("service cache write lock")
+            .home_feed = Some(CacheEntry {
+            value: feed.clone(),
+            expires_at: Instant::now() + HOME_FEED_TTL,
+        });
+        log_perf("home_feed", started);
+        feed
     }
 
     pub fn catalog(&self, media_type: Option<MediaType>) -> Vec<MediaItem> {
-        self.addons
+        let cache_key = catalog_cache_key(media_type.as_ref());
+        let now = Instant::now();
+        if let Some(items) = self
+            .cache
+            .read()
+            .expect("service cache read lock")
+            .catalog
+            .get(&cache_key)
+            .filter(|entry| entry.expires_at > now)
+            .map(|entry| entry.value.clone())
+        {
+            return items;
+        }
+
+        let started = Instant::now();
+        let items = self
+            .addons
             .read()
             .expect("addon registry read lock")
-            .catalog(media_type)
+            .catalog(media_type);
+        let mut cache = self.cache.write().expect("service cache write lock");
+        if cache.catalog.len() >= CACHE_MAX_ENTRIES {
+            cache.catalog.clear();
+        }
+        cache.catalog.insert(
+            cache_key,
+            CacheEntry {
+                value: items.clone(),
+                expires_at: Instant::now() + CATALOG_TTL,
+            },
+        );
+        log_perf("catalog", started);
+        items
     }
 
     pub fn search(&self, query: &str) -> Vec<MediaItem> {
-        let registry = self.addons.read().expect("addon registry read lock");
-        let results = registry.search(query);
-        if !results.is_empty() || query.trim().is_empty() {
-            return results;
+        let normalized_query = query.trim().to_lowercase();
+        let now = Instant::now();
+        if let Some(items) = self
+            .cache
+            .read()
+            .expect("service cache read lock")
+            .search
+            .get(&normalized_query)
+            .filter(|entry| entry.expires_at > now)
+            .map(|entry| entry.value.clone())
+        {
+            return items;
         }
 
-        // Fallback: if addons don't expose a dedicated search resource,
-        // run a local query across catalog items so sidebar search still works.
-        let query = query.trim().to_lowercase();
-        registry
-            .catalog(None)
-            .into_iter()
-            .filter(|item| media_item_matches_query(item, &query))
-            .collect()
+        let started = Instant::now();
+        let registry = self.addons.read().expect("addon registry read lock");
+        let results = registry.search(query);
+        let final_results = if !results.is_empty() || normalized_query.is_empty() {
+            results
+        } else {
+            registry
+                .catalog(None)
+                .into_iter()
+                .filter(|item| media_item_matches_query(item, &normalized_query))
+                .collect()
+        };
+
+        let mut cache = self.cache.write().expect("service cache write lock");
+        if cache.search.len() >= CACHE_MAX_ENTRIES {
+            cache.search.clear();
+        }
+        cache.search.insert(
+            normalized_query,
+            CacheEntry {
+                value: final_results.clone(),
+                expires_at: Instant::now() + SEARCH_TTL,
+            },
+        );
+        log_perf("search", started);
+        final_results
     }
 
     pub fn item(&self, id: &str) -> Option<MediaItem> {
@@ -58,16 +172,41 @@ impl AppServices {
     }
 
     pub fn streams(&self, id: &str) -> Option<Vec<StreamSource>> {
-        let registry = self.addons.read().expect("addon registry read lock");
-        let item = registry.item(id)?;
-        let lookup = registry.stream_lookup(&item);
+        let lookup = self.stream_lookup(id)?;
         (!lookup.streams.is_empty()).then_some(lookup.streams)
     }
 
     pub fn stream_lookup(&self, id: &str) -> Option<StreamLookup> {
+        let now = Instant::now();
+        if let Some(lookup) = self
+            .cache
+            .read()
+            .expect("service cache read lock")
+            .stream_lookup
+            .get(id)
+            .filter(|entry| entry.expires_at > now)
+            .map(|entry| entry.value.clone())
+        {
+            return Some(lookup);
+        }
+
+        let started = Instant::now();
         let registry = self.addons.read().expect("addon registry read lock");
         let item = registry.item(id)?;
-        Some(registry.stream_lookup(&item))
+        let lookup = registry.stream_lookup(&item);
+        let mut cache = self.cache.write().expect("service cache write lock");
+        if cache.stream_lookup.len() >= CACHE_MAX_ENTRIES {
+            cache.stream_lookup.clear();
+        }
+        cache.stream_lookup.insert(
+            id.to_string(),
+            CacheEntry {
+                value: lookup.clone(),
+                expires_at: Instant::now() + STREAM_LOOKUP_TTL,
+            },
+        );
+        log_perf("stream_lookup", started);
+        Some(lookup)
     }
 
     pub fn submit_torbox_magnet(
@@ -76,12 +215,20 @@ impl AppServices {
         magnet: &str,
         only_if_cached: bool,
     ) -> Option<AcquisitionResult> {
+        let started = Instant::now();
         let registry = self.addons.read().expect("addon registry read lock");
         let item = registry.item(id)?;
-        Some(registry.submit_magnet(&item, magnet, only_if_cached))
+        let result = registry.submit_magnet(&item, magnet, only_if_cached);
+
+        let mut cache = self.cache.write().expect("service cache write lock");
+        cache.stream_lookup.remove(id);
+        cache.home_feed = None;
+        log_perf("submit_torbox_magnet", started);
+        Some(result)
     }
 
     pub fn addons(&self) -> Vec<AddonDescriptor> {
+        let started = Instant::now();
         let registry_descriptors = self
             .addons
             .read()
@@ -134,6 +281,7 @@ impl AppServices {
                 .into_iter()
                 .filter(|addon| matches!(addon.transport, crate::domain::AddonTransport::Builtin)),
         );
+        log_perf("addons", started);
         ordered
     }
 
@@ -172,6 +320,23 @@ impl AppServices {
         let urls = self.store.enabled_urls();
         *self.addons.write().expect("addon registry write lock") =
             AddonRegistry::from_manifest_urls(&urls);
+        self.cache.write().expect("service cache write lock").clear();
+    }
+}
+
+fn catalog_cache_key(media_type: Option<&MediaType>) -> String {
+    match media_type {
+        Some(MediaType::Movie) => "movie".into(),
+        Some(MediaType::Series) => "series".into(),
+        Some(MediaType::Channel) => "channel".into(),
+        None => "all".into(),
+    }
+}
+
+fn log_perf(operation: &str, started: Instant) {
+    let elapsed = started.elapsed();
+    if elapsed.as_millis() >= PERF_LOG_THRESHOLD_MS {
+        eprintln!("[perf] services.{operation} took {}ms", elapsed.as_millis());
     }
 }
 
