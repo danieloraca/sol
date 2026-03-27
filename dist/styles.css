@@ -518,7 +518,9 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 }
 
 .poster {
-  height: 132px;
+  height: auto;
+  aspect-ratio: 2 / 3;
+  min-height: 240px;
   margin-bottom: 14px;
   border-radius: 18px;
   overflow: hidden;
@@ -636,6 +638,34 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
   object-position: center;
   background: #02060b;
   cursor: pointer;
+}
+
+.player-video::-webkit-media-controls-volume-slider,
+.player-video::-webkit-media-controls-mute-button,
+.player-video::-webkit-media-controls-volume-control-container,
+.player-video::-webkit-media-controls-volume-slider-container,
+.player-video::-webkit-media-controls-volume-slider-mute-button,
+.player-video::-webkit-media-controls-volume-slider-container,
+.player-video::-webkit-media-controls-volume-slider-thumb,
+.player-video::-webkit-media-controls-volume-slider-container > *,
+.player-video::-webkit-media-controls-mute-button > * {
+  display: none !important;
+}
+
+.player-video::-webkit-media-controls-panel {
+  overflow: hidden;
+}
+
+.player-video[disablepictureinpicture]::-webkit-media-controls-overlay-play-button,
+.player-video[disablepictureinpicture]::-webkit-media-controls-start-playback-button {
+  display: none !important;
+}
+
+.player-stage .slider.default.volume,
+.player-video-shell .slider.default.volume {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 .player-screen.is-video .player-art {
