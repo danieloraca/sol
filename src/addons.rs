@@ -107,6 +107,7 @@ impl AddonRegistry {
             let handles = self
                 .addons
                 .iter()
+                .filter(|addon| include_addon_in_discovery(addon))
                 .map(|addon| {
                     let addon = Arc::clone(addon);
                     scope.spawn(move || {
@@ -162,6 +163,7 @@ impl AddonRegistry {
             let handles = self
                 .addons
                 .iter()
+                .filter(|addon| include_addon_in_discovery(addon))
                 .map(|addon| {
                     let addon = Arc::clone(addon);
                     let media_type = media_type.clone();
@@ -188,6 +190,7 @@ impl AddonRegistry {
             let handles = self
                 .addons
                 .iter()
+                .filter(|addon| include_addon_in_discovery(addon))
                 .map(|addon| {
                     let addon = Arc::clone(addon);
                     let query = query.to_string();
@@ -1578,6 +1581,22 @@ fn remote_addon_priority(descriptor: &AddonDescriptor) -> u8 {
     } else {
         1
     }
+}
+
+fn include_addon_in_discovery(addon: &Arc<dyn SolAddon>) -> bool {
+    let descriptor = addon.descriptor();
+    if !matches!(descriptor.transport, AddonTransport::Remote) {
+        return true;
+    }
+
+    let haystack = format!(
+        "{} {} {}",
+        descriptor.id.to_ascii_lowercase(),
+        descriptor.name.to_ascii_lowercase(),
+        descriptor.source.to_ascii_lowercase()
+    );
+
+    !haystack.contains("torbox")
 }
 
 fn log_addon_timing(operation: &str, addon: &Arc<dyn SolAddon>, elapsed: Duration) {
