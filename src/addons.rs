@@ -33,7 +33,9 @@ const REMOTE_CATALOG_BUDGET: Duration = Duration::from_millis(3200);
 const REMOTE_SEARCH_BUDGET: Duration = Duration::from_millis(3500);
 const REMOTE_ITEM_BUDGET: Duration = Duration::from_millis(2200);
 const REMOTE_STREAM_LOOKUP_BUDGET: Duration = Duration::from_millis(3200);
+const REMOTE_STREAM_LOOKUP_BUDGET_SLOW_ADDON: Duration = Duration::from_millis(6500);
 const REMOTE_MIN_REQUEST_TIMEOUT: Duration = Duration::from_millis(120);
+const STREAM_TRACE_ENV: &str = "SOL_DEBUG_STREAM_TRACE";
 
 pub trait SolAddon: Send + Sync {
     fn descriptor(&self) -> AddonDescriptor;
@@ -988,28 +990,83 @@ impl RemoteHttpAddon {
     }
 
     fn stream_response(&self, item: &MediaItem) -> Option<RemoteStreamResponse> {
+        let stream_budget = self.stream_lookup_budget();
         let started = Instant::now();
-        if started.elapsed() >= REMOTE_STREAM_LOOKUP_BUDGET {
+        if started.elapsed() >= stream_budget {
             return None;
         }
-        let stream_id = select_supported_resource_id(self, "stream", item)?;
-        let response = self.fetch_json_budgeted::<RemoteStreamResponse>(
-            format!(
+        let stream_ids = stream_id_candidates_for_addon(self, item);
+        let mut response: Option<RemoteStreamResponse> = None;
+        for stream_id in stream_ids {
+            if started.elapsed() >= stream_budget {
+                break;
+            }
+            let request_url = format!(
                 "{}/stream/{}/{}.json",
                 self.base_url,
                 media_type_to_remote(&item.media_type),
                 encode_path_value(&stream_id)
-            ),
-            started,
-            REMOTE_STREAM_LOOKUP_BUDGET,
-        );
-        if started.elapsed() >= REMOTE_STREAM_LOOKUP_BUDGET {
+            );
+            stream_trace(format!(
+                "addon.stream_lookup.request addon={} ({}) item_id={} stream_id={} alternates={}",
+                self.manifest.name,
+                self.manifest.id,
+                item.id,
+                stream_id,
+                item.alternate_ids.join(",")
+            ));
+            let attempted = self.fetch_json_budgeted::<RemoteStreamResponse>(
+                request_url.clone(),
+                started,
+                stream_budget,
+            );
+            match attempted.as_ref() {
+                Some(payload) => {
+                    stream_trace(format!(
+                        "addon.stream_lookup.response addon={} ({}) stream_id={} streams={} url={}",
+                        self.manifest.name,
+                        self.manifest.id,
+                        stream_id,
+                        payload.streams.len(),
+                        request_url
+                    ));
+                    if !payload.streams.is_empty() {
+                        response = attempted;
+                        break;
+                    }
+                    if response.is_none() {
+                        response = attempted;
+                    }
+                }
+                None => {
+                    stream_trace(format!(
+                        "addon.stream_lookup.response addon={} ({}) stream_id={} streams=0 reason=empty_or_http_error_or_timeout url={}",
+                        self.manifest.name, self.manifest.id, stream_id, request_url
+                    ));
+                }
+            }
+        }
+        if started.elapsed() >= stream_budget {
             eprintln!(
                 "[perf] addon.stream_lookup budget reached for {} ({})",
                 self.manifest.name, self.manifest.id
             );
         }
         response
+    }
+
+    fn stream_lookup_budget(&self) -> Duration {
+        let haystack = format!(
+            "{} {} {}",
+            self.manifest.id.to_ascii_lowercase(),
+            self.manifest.name.to_ascii_lowercase(),
+            self.manifest_url.to_ascii_lowercase()
+        );
+        if haystack.contains("aiostream") {
+            REMOTE_STREAM_LOOKUP_BUDGET_SLOW_ADDON
+        } else {
+            REMOTE_STREAM_LOOKUP_BUDGET
+        }
     }
 }
 
@@ -1081,6 +1138,23 @@ impl SolAddon for RemoteHttpAddon {
 
     fn stream_lookup(&self, item: &MediaItem) -> Option<StreamLookup> {
         let response = self.stream_response(item)?;
+        if stream_trace_enabled() {
+            let sample = response
+                .streams
+                .iter()
+                .take(5)
+                .map(remote_stream_shape)
+                .collect::<Vec<_>>()
+                .join(" | ");
+            stream_trace(format!(
+                "addon.stream_lookup.raw addon={} ({}) item={} raw_streams={} sample=[{}]",
+                self.manifest.name,
+                self.manifest.id,
+                item.id,
+                response.streams.len(),
+                sample
+            ));
+        }
         let streams = response
             .streams
             .clone()
@@ -1109,6 +1183,14 @@ impl SolAddon for RemoteHttpAddon {
                 magnet_url: Some(release.magnet_url),
             })
             .collect::<Vec<_>>();
+        stream_trace(format!(
+            "addon.stream_lookup.mapped addon={} ({}) item={} mapped_streams={} mapped_candidates={}",
+            self.manifest.name,
+            self.manifest.id,
+            item.id,
+            streams.len(),
+            candidates.len()
+        ));
 
         Some(StreamLookup {
             provider: self.manifest.name.clone(),
@@ -1226,25 +1308,22 @@ impl RemoteResourceObject {
     }
 }
 
-fn select_supported_resource_id(
-    addon: &RemoteHttpAddon,
-    resource_name: &str,
-    item: &MediaItem,
-) -> Option<String> {
-    media_id_candidates(item)
-        .into_iter()
-        .find(|candidate| {
-            addon.supports_resource(
-                resource_name,
-                Some(item.media_type.clone()),
-                Some(candidate.as_str()),
-            )
-        })
-        .or_else(|| {
-            addon
-                .supports_resource(resource_name, Some(item.media_type.clone()), Some(&item.id))
-                .then(|| item.id.clone())
-        })
+fn stream_id_candidates_for_addon(addon: &RemoteHttpAddon, item: &MediaItem) -> Vec<String> {
+    let mut ids = media_id_candidates(item);
+    ids.sort_by_key(|id| if id.starts_with("tt") { 0 } else { 1 });
+    ids.retain(|candidate| {
+        addon.supports_resource(
+            "stream",
+            Some(item.media_type.clone()),
+            Some(candidate.as_str()),
+        )
+    });
+    if ids.is_empty()
+        && addon.supports_resource("stream", Some(item.media_type.clone()), Some(&item.id))
+    {
+        ids.push(item.id.clone());
+    }
+    ids
 }
 
 fn media_id_candidates(item: &MediaItem) -> Vec<String> {
@@ -1377,7 +1456,16 @@ fn dedupe_stream_sources(mut streams: Vec<StreamSource>) -> Vec<StreamSource> {
     let mut seen = BTreeSet::new();
     streams
         .into_iter()
-        .filter(|stream| seen.insert(stream.url.clone()))
+        .filter(|stream| {
+            let inserted = seen.insert(stream.url.clone());
+            if !inserted {
+                stream_trace(format!(
+                    "services.stream_lookup.dedupe dropped provider={} name={} url={}",
+                    stream.provider, stream.name, stream.url
+                ));
+            }
+            inserted
+        })
         .collect()
 }
 
@@ -1631,6 +1719,21 @@ fn magnet_from_info_hash(hash: &str, file_idx: Option<i64>, title: Option<&str>)
     magnet
 }
 
+fn remote_stream_shape(stream: &RemoteStream) -> String {
+    format!(
+        "name={} title={} url={} external={} info_hash={} file_idx={}",
+        stream.name.as_deref().unwrap_or("-"),
+        stream.title.as_deref().unwrap_or("-"),
+        stream.url.as_deref().unwrap_or("-"),
+        stream.external_url.as_deref().unwrap_or("-"),
+        stream.info_hash.as_deref().unwrap_or("-"),
+        stream
+            .file_idx
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".into())
+    )
+}
+
 fn parse_release_year(value: Option<&str>) -> u16 {
     value
         .and_then(|raw| {
@@ -1722,6 +1825,25 @@ fn remaining_budget_timeout(started: Instant, budget: Duration) -> Option<Durati
     (remaining >= REMOTE_MIN_REQUEST_TIMEOUT).then_some(remaining)
 }
 
+fn stream_trace_enabled() -> bool {
+    std::env::var(STREAM_TRACE_ENV)
+        .ok()
+        .map(|value| {
+            let normalized = value.trim().to_ascii_lowercase();
+            !normalized.is_empty()
+                && normalized != "0"
+                && normalized != "false"
+                && normalized != "off"
+        })
+        .unwrap_or(false)
+}
+
+fn stream_trace(message: String) {
+    if stream_trace_enabled() {
+        eprintln!("[stream-trace] {message}");
+    }
+}
+
 fn log_addon_timing(operation: &str, addon: &Arc<dyn SolAddon>, elapsed: Duration) {
     if elapsed.as_millis() < ADDON_PERF_LOG_THRESHOLD_MS {
         return;
@@ -1743,7 +1865,7 @@ mod tests {
         AddonRegistry, RemoteHttpAddon, RemoteManifest, RemoteResourceEntry, RemoteResourceObject,
         RemoteStream, dedupe_stream_sources, map_remote_stream_source,
         map_remote_stream_source_release, media_id_candidates, remote_addon_priority,
-        select_supported_resource_id,
+        stream_id_candidates_for_addon,
     };
     use crate::domain::{AddonDescriptor, AddonTransport, MediaItem, MediaType, StreamSource};
 
@@ -1781,7 +1903,7 @@ mod tests {
     }
 
     #[test]
-    fn select_supported_resource_id_prefers_matching_alternate_id() {
+    fn stream_id_candidates_prefers_matching_alternate_id() {
         let addon = RemoteHttpAddon {
             manifest_url: "https://example.com/manifest.json".into(),
             base_url: "https://example.com".into(),
@@ -1812,9 +1934,8 @@ mod tests {
             streams: vec![],
         };
 
-        let id = select_supported_resource_id(&addon, "stream", &item);
-
-        assert_eq!(id.as_deref(), Some("tt1234567"));
+        let ids = stream_id_candidates_for_addon(&addon, &item);
+        assert_eq!(ids.first().map(String::as_str), Some("tt1234567"));
     }
 
     #[test]
