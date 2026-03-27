@@ -1318,9 +1318,7 @@ fn stream_id_candidates_for_addon(addon: &RemoteHttpAddon, item: &MediaItem) -> 
             Some(candidate.as_str()),
         )
     });
-    if ids.is_empty()
-        && addon.supports_resource("stream", Some(item.media_type.clone()), Some(&item.id))
-    {
+    if ids.is_empty() {
         ids.push(item.id.clone());
     }
     ids
@@ -1936,6 +1934,79 @@ mod tests {
 
         let ids = stream_id_candidates_for_addon(&addon, &item);
         assert_eq!(ids.first().map(String::as_str), Some("tt1234567"));
+    }
+
+    #[test]
+    fn stream_id_candidates_returns_item_id_when_prefixes_do_not_match() {
+        let addon = RemoteHttpAddon {
+            manifest_url: "https://example.com/manifest.json".into(),
+            base_url: "https://example.com".into(),
+            manifest: RemoteManifest {
+                id: "test.addon".into(),
+                version: "1.0.0".into(),
+                name: "Test Addon".into(),
+                resources: vec![RemoteResourceEntry::Object(RemoteResourceObject {
+                    name: "stream".into(),
+                    types: vec!["movie".into()],
+                    id_prefixes: vec!["tt".into()],
+                })],
+                catalogs: vec![],
+                types: vec!["movie".into()],
+            },
+            client: Client::builder().build().expect("test client should build"),
+        };
+        let item = MediaItem {
+            id: "tmdb:movie:999".into(),
+            alternate_ids: vec!["tmdb:movie:123".into()],
+            title: "Test".into(),
+            description: String::new(),
+            media_type: MediaType::Movie,
+            genres: vec![],
+            poster_url: String::new(),
+            backdrop_url: String::new(),
+            year: 2026,
+            streams: vec![],
+        };
+
+        let ids = stream_id_candidates_for_addon(&addon, &item);
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0], "tmdb:movie:999");
+    }
+
+    #[test]
+    fn stream_id_candidates_prioritize_imdb_ids_before_tmdb() {
+        let addon = RemoteHttpAddon {
+            manifest_url: "https://example.com/manifest.json".into(),
+            base_url: "https://example.com".into(),
+            manifest: RemoteManifest {
+                id: "test.addon".into(),
+                version: "1.0.0".into(),
+                name: "Test Addon".into(),
+                resources: vec![RemoteResourceEntry::Object(RemoteResourceObject {
+                    name: "stream".into(),
+                    types: vec!["movie".into()],
+                    id_prefixes: vec![],
+                })],
+                catalogs: vec![],
+                types: vec!["movie".into()],
+            },
+            client: Client::builder().build().expect("test client should build"),
+        };
+        let item = MediaItem {
+            id: "tmdb:movie:999".into(),
+            alternate_ids: vec!["tt0407887".into(), "tmdb:movie:123".into()],
+            title: "Test".into(),
+            description: String::new(),
+            media_type: MediaType::Movie,
+            genres: vec![],
+            poster_url: String::new(),
+            backdrop_url: String::new(),
+            year: 2026,
+            streams: vec![],
+        };
+
+        let ids = stream_id_candidates_for_addon(&addon, &item);
+        assert_eq!(ids.first().map(String::as_str), Some("tt0407887"));
     }
 
     #[test]

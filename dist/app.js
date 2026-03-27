@@ -700,6 +700,7 @@ function renderPlayer(item) {
         <button class="ghost-button" data-player-action="restart">Restart</button>
         <button class="ghost-button" data-player-action="next-source">Next source</button>
       </div>
+      <p class="meta">Next source cycles within: ${escapeHtml(nextSourceScopeLabel())}</p>
     </article>
   `;
 
@@ -747,6 +748,7 @@ function renderHandoffPlayer(item, stream) {
         <button class="primary-button" id="handoff-open-source">${openSourceLabel(stream)}</button>
         <button class="ghost-button" data-player-action="next-source">Next source</button>
       </div>
+      <p class="meta">Next source cycles within: ${escapeHtml(nextSourceScopeLabel())}</p>
     </article>
   `;
 
@@ -788,7 +790,7 @@ function handlePlayerAction(action, item) {
   } else if (action === "next-source" && selectedStreams.length > 0) {
     const resumeAt = getCurrentPlaybackSeconds();
     const shouldResume = isPlaying;
-    selectedStreamIndex = (selectedStreamIndex + 1) % selectedStreams.length;
+    selectedStreamIndex = nextStreamIndexForActiveFilter();
     pendingSeekSeconds = resumeAt;
     lastPlaybackError = "";
     setPlaybackState(false);
@@ -802,6 +804,31 @@ function handlePlayerAction(action, item) {
   }
 
   syncPlayerUi(item, activeStreamForSelection());
+}
+
+function nextStreamIndexForActiveFilter() {
+  if (selectedStreams.length === 0) {
+    return 0;
+  }
+  if (selectedStreamProviderFilter === "all") {
+    return (selectedStreamIndex + 1) % selectedStreams.length;
+  }
+
+  const providerIndexes = selectedStreams
+    .map((stream, index) => ({ stream, index }))
+    .filter(({ stream }) => streamProviderName(stream) === selectedStreamProviderFilter)
+    .map(({ index }) => index);
+
+  if (providerIndexes.length === 0) {
+    return (selectedStreamIndex + 1) % selectedStreams.length;
+  }
+
+  const currentPosition = providerIndexes.indexOf(selectedStreamIndex);
+  if (currentPosition < 0) {
+    return providerIndexes[0];
+  }
+
+  return providerIndexes[(currentPosition + 1) % providerIndexes.length];
 }
 
 function renderStreams(title) {
@@ -1012,6 +1039,10 @@ function streamDisplayTitle(stream) {
 
 function streamProviderTabLabel(provider) {
   return provider === "all" ? "All" : provider;
+}
+
+function nextSourceScopeLabel() {
+  return selectedStreamProviderFilter === "all" ? "All providers" : selectedStreamProviderFilter;
 }
 
 function streamSourceLine(stream) {
