@@ -822,6 +822,10 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
   backdrop-filter: blur(1.5px);
 }
 
+.player-overlay-loading {
+  max-width: min(56ch, 72%);
+}
+
 .player-overlay h2 {
   font-size: clamp(2rem, 4vw, 3.6rem);
   line-height: 0.98;
@@ -838,6 +842,33 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 .player-overlay p,
 .player-details-card p {
   margin: 0;
+}
+
+.player-loading-card {
+  align-content: start;
+  gap: 12px;
+}
+
+.loading-pulse {
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(125, 249, 208, 0.18), rgba(255, 255, 255, 0.08), rgba(125, 249, 208, 0.18));
+  background-size: 220% 100%;
+  animation: loadingPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes loadingPulse {
+  0% {
+    background-position: 100% 0;
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    background-position: 0 0;
+    opacity: 0.55;
+  }
 }
 
 .player-subtitle {

@@ -61,6 +61,7 @@ let lastExecutedSearch = "";
 let isSearchViewActive = false;
 let currentPage = "main";
 let playerReturnPage = "main";
+let selectItemRequestToken = 0;
 let fullscreenListenerBound = false;
 let isPlayerFullscreen = false;
 let isNativeFullscreen = false;
@@ -571,8 +572,13 @@ function bindHeroButtons() {
 
 async function selectItem(id, options = {}) {
   const { autoPlay = false } = options;
+  const requestToken = ++selectItemRequestToken;
+  renderPlayerLoadingState(id);
   try {
     const item = await getItem(id);
+    if (requestToken !== selectItemRequestToken) {
+      return;
+    }
     if (id !== selectedItemId) {
       stopTorboxAutoRefresh();
       torboxSubmissionState = null;
@@ -584,6 +590,9 @@ async function selectItem(id, options = {}) {
     resetPlaybackSession();
     selectedItemId = id;
     selectedLookup = await invoke("get_stream_lookup", { id });
+    if (requestToken !== selectItemRequestToken) {
+      return;
+    }
     selectedStreams = selectedLookup.streams ?? [];
     selectedStreamIndex = 0;
     selectedStreamProviderFilter = "all";
@@ -607,8 +616,43 @@ async function selectItem(id, options = {}) {
       }
     }
   } catch (error) {
+    if (requestToken !== selectItemRequestToken) {
+      return;
+    }
     renderShellError(String(error));
   }
+}
+
+function renderPlayerLoadingState(id) {
+  const cached = itemCache.get(id);
+  const title = cached?.title ? escapeHtml(cached.title) : "Loading title";
+  const description = cached?.description
+    ? escapeHtml(cached.description)
+    : "Fetching metadata and stream sources...";
+
+  playerStageEl.innerHTML = `
+    <div class="player-screen">
+      <div class="player-art ${heroArtworkUrl(cached) ? "" : "is-fallback"}">
+        ${cached ? renderArtworkImage(cached, "player-poster") : ""}
+      </div>
+      <div class="player-overlay player-overlay-loading">
+        <p class="eyebrow">Player</p>
+        <h2>${title}</h2>
+        <p>${description}</p>
+      </div>
+    </div>
+  `;
+
+  playerDetailsEl.innerHTML = `
+    <article class="player-details-card player-loading-card">
+      <p class="eyebrow">Preparing playback</p>
+      <p>Loading stream sources for this title...</p>
+      <div class="loading-pulse"></div>
+    </article>
+  `;
+
+  streamsEl.classList.add("empty");
+  streamsEl.textContent = "Loading available stream sources...";
 }
 
 async function getItem(id) {
