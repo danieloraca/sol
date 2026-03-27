@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, fs, path::PathBuf, sync::Arc};
+use std::{collections::BTreeSet, fs, path::PathBuf, sync::Arc, time::Duration};
 
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,13 @@ use crate::{
         TorboxStreamProvider,
     },
 };
+
+const REMOTE_HOME_CATALOG_LIMIT: usize = 4;
+const REMOTE_HOME_ITEM_LIMIT: usize = 120;
+const REMOTE_CATALOG_LIMIT: usize = 10;
+const REMOTE_CATALOG_ITEM_LIMIT: usize = 240;
+const REMOTE_SEARCH_CATALOG_LIMIT: usize = 14;
+const REMOTE_SEARCH_ITEM_LIMIT: usize = 320;
 
 pub trait SolAddon: Send + Sync {
     fn descriptor(&self) -> AddonDescriptor;
@@ -655,6 +662,8 @@ impl RemoteHttpAddon {
                 env!("CARGO_PKG_NAME"),
                 env!("CARGO_PKG_VERSION")
             ))
+            .connect_timeout(Duration::from_secs(2))
+            .timeout(Duration::from_secs(5))
             .build()
             .map_err(|error| format!("Could not build addon client: {error}"))?;
 
@@ -728,13 +737,19 @@ impl RemoteHttpAddon {
             .ok()
     }
 
-    fn catalog_items(&self, media_type: Option<MediaType>) -> Vec<MediaItem> {
+    fn catalog_items_with_limit(
+        &self,
+        media_type: Option<MediaType>,
+        catalog_limit: usize,
+        item_limit: usize,
+    ) -> Vec<MediaItem> {
         if !self.supports_resource("catalog", media_type.clone(), None) {
             return vec![];
         }
 
         self.catalogs_for(media_type, false)
             .into_iter()
+            .take(catalog_limit)
             .filter_map(|catalog| {
                 self.fetch_json::<RemoteCatalogResponse>(format!(
                     "{}/catalog/{}/{}.json",
@@ -743,7 +758,12 @@ impl RemoteHttpAddon {
             })
             .flat_map(|response| response.metas)
             .filter_map(map_remote_meta_preview)
+            .take(item_limit)
             .collect()
+    }
+
+    fn catalog_items(&self, media_type: Option<MediaType>) -> Vec<MediaItem> {
+        self.catalog_items_with_limit(media_type, REMOTE_CATALOG_LIMIT, REMOTE_CATALOG_ITEM_LIMIT)
     }
 
     fn search_items(&self, query: &str) -> Vec<MediaItem> {
@@ -753,6 +773,7 @@ impl RemoteHttpAddon {
 
         self.catalogs_for(None, true)
             .into_iter()
+            .take(REMOTE_SEARCH_CATALOG_LIMIT)
             .filter_map(|catalog| {
                 self.fetch_json::<RemoteCatalogResponse>(format!(
                     "{}/catalog/{}/{}/search={}.json",
@@ -764,6 +785,7 @@ impl RemoteHttpAddon {
             })
             .flat_map(|response| response.metas)
             .filter_map(map_remote_meta_preview)
+            .take(REMOTE_SEARCH_ITEM_LIMIT)
             .collect()
     }
 
@@ -823,7 +845,11 @@ impl SolAddon for RemoteHttpAddon {
     }
 
     fn home_feed(&self) -> Option<HomeFeed> {
-        let items = self.catalog_items(None);
+        let items = self.catalog_items_with_limit(
+            None,
+            REMOTE_HOME_CATALOG_LIMIT,
+            REMOTE_HOME_ITEM_LIMIT,
+        );
         if items.is_empty() {
             return None;
         }

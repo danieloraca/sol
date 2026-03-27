@@ -65,6 +65,8 @@ let fullscreenListenerBound = false;
 let isPlayerFullscreen = false;
 let isNativeFullscreen = false;
 let fullscreenControlsTimer = null;
+let fullscreenPointerTicking = false;
+let lastFullscreenControlsRefreshMs = 0;
 
 async function bootstrap() {
   if (!invoke) {
@@ -73,9 +75,10 @@ async function bootstrap() {
   }
 
   await renderHome();
-  await renderCatalog();
-  await renderAddons();
-  await selectItem(homeFeed.hero.id);
+  await Promise.all([renderCatalog(), renderAddons()]);
+  if (homeFeed?.hero?.id) {
+    void selectItem(homeFeed.hero.id);
+  }
 
   searchEl.addEventListener("input", handleSearch);
   searchEl.addEventListener("keydown", async (event) => {
@@ -131,9 +134,15 @@ async function bootstrap() {
 
   if (!fullscreenListenerBound) {
     document.addEventListener("mousemove", () => {
-      if (isPlayerFullscreen) {
-        showFullscreenControls();
+      if (!isPlayerFullscreen || fullscreenPointerTicking) {
+        return;
       }
+
+      fullscreenPointerTicking = true;
+      window.requestAnimationFrame(() => {
+        fullscreenPointerTicking = false;
+        showFullscreenControls();
+      });
     });
     document.addEventListener("touchstart", () => {
       if (isPlayerFullscreen) {
@@ -1946,6 +1955,11 @@ function setPlayerFullscreen(nextState) {
 }
 
 function showFullscreenControls() {
+  const now = performance.now();
+  if (now - lastFullscreenControlsRefreshMs < 180) {
+    return;
+  }
+  lastFullscreenControlsRefreshMs = now;
   document.body.classList.add("is-player-controls-visible");
   scheduleFullscreenControlsHide();
 }

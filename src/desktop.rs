@@ -10,13 +10,19 @@ use crate::{
 };
 
 #[tauri::command]
-fn get_home_feed(state: tauri::State<'_, AppState>) -> HomeFeed {
-    state.home_feed()
+async fn get_home_feed(state: tauri::State<'_, AppState>) -> Result<HomeFeed, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.home_feed())
+        .await
+        .map_err(|error| format!("Home feed task failed: {error}"))
 }
 
 #[tauri::command]
-fn get_addons(state: tauri::State<'_, AppState>) -> Vec<AddonDescriptor> {
-    state.addons()
+async fn get_addons(state: tauri::State<'_, AppState>) -> Result<Vec<AddonDescriptor>, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.addons())
+        .await
+        .map_err(|error| format!("Addon task failed: {error}"))
 }
 
 #[tauri::command]
@@ -59,20 +65,41 @@ fn move_remote_addon(
 }
 
 #[tauri::command]
-fn get_catalog(state: tauri::State<'_, AppState>, media_type: Option<String>) -> Vec<MediaItem> {
-    state.catalog(media_type.as_ref().and_then(|raw| parse_media_type(raw)))
+async fn get_catalog(
+    state: tauri::State<'_, AppState>,
+    media_type: Option<String>,
+) -> Result<Vec<MediaItem>, String> {
+    let state = state.inner().clone();
+    let parsed = media_type.as_ref().and_then(|raw| parse_media_type(raw));
+    tauri::async_runtime::spawn_blocking(move || state.catalog(parsed))
+        .await
+        .map_err(|error| format!("Catalog task failed: {error}"))
 }
 
 #[tauri::command]
-fn search_catalog(state: tauri::State<'_, AppState>, query: String) -> Vec<MediaItem> {
-    state.search(&query)
+async fn search_catalog(
+    state: tauri::State<'_, AppState>,
+    query: String,
+) -> Result<Vec<MediaItem>, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.search(&query))
+        .await
+        .map_err(|error| format!("Search task failed: {error}"))
 }
 
 #[tauri::command]
-fn get_media_item(state: tauri::State<'_, AppState>, id: String) -> Result<MediaItem, String> {
-    state
-        .item(&id)
-        .ok_or_else(|| format!("No media item found for {id}"))
+async fn get_media_item(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<MediaItem, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state
+            .item(&id)
+            .ok_or_else(|| format!("No media item found for {id}"))
+    })
+    .await
+    .map_err(|error| format!("Meta task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -86,25 +113,35 @@ fn get_streams(
 }
 
 #[tauri::command]
-fn get_stream_lookup(
+async fn get_stream_lookup(
     state: tauri::State<'_, AppState>,
     id: String,
 ) -> Result<StreamLookup, String> {
-    state
-        .stream_lookup(&id)
-        .ok_or_else(|| format!("No stream lookup available for {id}"))
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state
+            .stream_lookup(&id)
+            .ok_or_else(|| format!("No stream lookup available for {id}"))
+    })
+    .await
+    .map_err(|error| format!("Stream lookup task failed: {error}"))?
 }
 
 #[tauri::command]
-fn submit_torbox_magnet(
+async fn submit_torbox_magnet(
     state: tauri::State<'_, AppState>,
     id: String,
     magnet: String,
     only_if_cached: bool,
 ) -> Result<AcquisitionResult, String> {
-    state
-        .submit_torbox_magnet(&id, &magnet, only_if_cached)
-        .ok_or_else(|| format!("No media item found for {id}"))
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state
+            .submit_torbox_magnet(&id, &magnet, only_if_cached)
+            .ok_or_else(|| format!("No media item found for {id}"))
+    })
+    .await
+    .map_err(|error| format!("TorBox submit task failed: {error}"))?
 }
 
 #[tauri::command]

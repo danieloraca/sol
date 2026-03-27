@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     env,
     sync::{Arc, OnceLock},
+    time::Duration,
 };
 
 use reqwest::{
@@ -212,6 +213,8 @@ impl TmdbMetadataProvider {
         Self {
             client: Client::builder()
                 .user_agent(format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")))
+                .connect_timeout(Duration::from_secs(2))
+                .timeout(Duration::from_secs(5))
                 .build()
                 .expect("tmdb client should build"),
             auth,
@@ -464,6 +467,8 @@ impl TorboxStreamProvider {
                 .filter(|value| !value.trim().is_empty()),
             client: Client::builder()
                 .user_agent(format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")))
+                .connect_timeout(Duration::from_secs(2))
+                .timeout(Duration::from_secs(5))
                 .build()
                 .expect("torbox client should build"),
         }
@@ -771,6 +776,8 @@ impl ProwlarrSourceProvider {
                 .filter(|value| !value.is_empty()),
             client: Client::builder()
                 .user_agent(format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")))
+                .connect_timeout(Duration::from_secs(2))
+                .timeout(Duration::from_secs(5))
                 .build()
                 .expect("prowlarr client should build"),
         }
