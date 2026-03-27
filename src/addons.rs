@@ -32,7 +32,8 @@ const REMOTE_HOME_BUDGET: Duration = Duration::from_millis(2800);
 const REMOTE_CATALOG_BUDGET: Duration = Duration::from_millis(3200);
 const REMOTE_SEARCH_BUDGET: Duration = Duration::from_millis(3500);
 const REMOTE_ITEM_BUDGET: Duration = Duration::from_millis(2200);
-const REMOTE_STREAM_LOOKUP_BUDGET: Duration = Duration::from_millis(2200);
+const REMOTE_STREAM_LOOKUP_BUDGET: Duration = Duration::from_millis(3200);
+const REMOTE_MIN_REQUEST_TIMEOUT: Duration = Duration::from_millis(120);
 
 pub trait SolAddon: Send + Sync {
     fn descriptor(&self) -> AddonDescriptor;
@@ -813,15 +814,30 @@ impl RemoteHttpAddon {
             .collect()
     }
 
-    fn fetch_json<T: for<'de> Deserialize<'de>>(&self, url: String) -> Option<T> {
+    fn fetch_json_with_timeout<T: for<'de> Deserialize<'de>>(
+        &self,
+        url: String,
+        timeout: Duration,
+    ) -> Option<T> {
         self.client
             .get(url)
+            .timeout(timeout)
             .send()
             .ok()?
             .error_for_status()
             .ok()?
             .json::<T>()
             .ok()
+    }
+
+    fn fetch_json_budgeted<T: for<'de> Deserialize<'de>>(
+        &self,
+        url: String,
+        started: Instant,
+        budget: Duration,
+    ) -> Option<T> {
+        let timeout = remaining_budget_timeout(started, budget)?;
+        self.fetch_json_with_timeout(url, timeout)
     }
 
     fn catalog_items_with_limit(
@@ -837,15 +853,28 @@ impl RemoteHttpAddon {
 
         let started = Instant::now();
         let mut items = Vec::new();
-        for catalog in self.catalogs_for(media_type, false).into_iter().take(catalog_limit) {
+        for catalog in self
+            .catalogs_for(media_type, false)
+            .into_iter()
+            .take(catalog_limit)
+        {
             if started.elapsed() >= budget || items.len() >= item_limit {
                 break;
             }
-            if let Some(response) = self.fetch_json::<RemoteCatalogResponse>(format!(
-                "{}/catalog/{}/{}.json",
-                self.base_url, catalog.catalog_type, catalog.id
-            )) {
-                items.extend(response.metas.into_iter().filter_map(map_remote_meta_preview));
+            if let Some(response) = self.fetch_json_budgeted::<RemoteCatalogResponse>(
+                format!(
+                    "{}/catalog/{}/{}.json",
+                    self.base_url, catalog.catalog_type, catalog.id
+                ),
+                started,
+                budget,
+            ) {
+                items.extend(
+                    response
+                        .metas
+                        .into_iter()
+                        .filter_map(map_remote_meta_preview),
+                );
                 if items.len() >= item_limit {
                     break;
                 }
@@ -882,17 +911,27 @@ impl RemoteHttpAddon {
             .into_iter()
             .take(REMOTE_SEARCH_CATALOG_LIMIT)
         {
-            if started.elapsed() >= REMOTE_SEARCH_BUDGET || items.len() >= REMOTE_SEARCH_ITEM_LIMIT {
+            if started.elapsed() >= REMOTE_SEARCH_BUDGET || items.len() >= REMOTE_SEARCH_ITEM_LIMIT
+            {
                 break;
             }
-            if let Some(response) = self.fetch_json::<RemoteCatalogResponse>(format!(
-                "{}/catalog/{}/{}/search={}.json",
-                self.base_url,
-                catalog.catalog_type,
-                catalog.id,
-                encode_path_value(query)
-            )) {
-                items.extend(response.metas.into_iter().filter_map(map_remote_meta_preview));
+            if let Some(response) = self.fetch_json_budgeted::<RemoteCatalogResponse>(
+                format!(
+                    "{}/catalog/{}/{}/search={}.json",
+                    self.base_url,
+                    catalog.catalog_type,
+                    catalog.id,
+                    encode_path_value(query)
+                ),
+                started,
+                REMOTE_SEARCH_BUDGET,
+            ) {
+                items.extend(
+                    response
+                        .metas
+                        .into_iter()
+                        .filter_map(map_remote_meta_preview),
+                );
                 if items.len() >= REMOTE_SEARCH_ITEM_LIMIT {
                     break;
                 }
@@ -908,18 +947,27 @@ impl RemoteHttpAddon {
         items
     }
 
-    fn fetch_item_meta(&self, media_type: MediaType, id: &str) -> Option<MediaItem> {
+    fn fetch_item_meta(
+        &self,
+        media_type: MediaType,
+        id: &str,
+        started: Instant,
+    ) -> Option<MediaItem> {
         if !self.supports_resource("meta", Some(media_type.clone()), Some(id)) {
             return None;
         }
 
         let remote_type = media_type_to_remote(&media_type);
-        let response = self.fetch_json::<RemoteMetaResponse>(format!(
-            "{}/meta/{}/{}.json",
-            self.base_url,
-            remote_type,
-            encode_path_value(id)
-        ))?;
+        let response = self.fetch_json_budgeted::<RemoteMetaResponse>(
+            format!(
+                "{}/meta/{}/{}.json",
+                self.base_url,
+                remote_type,
+                encode_path_value(id)
+            ),
+            started,
+            REMOTE_ITEM_BUDGET,
+        )?;
         map_remote_meta_value(response.meta)
     }
 
@@ -932,6 +980,10 @@ impl RemoteHttpAddon {
             .streams
             .into_iter()
             .filter_map(map_remote_stream_source_release)
+            .map(|mut release| {
+                release.indexer = self.manifest.name.clone();
+                release
+            })
             .collect()
     }
 
@@ -941,12 +993,16 @@ impl RemoteHttpAddon {
             return None;
         }
         let stream_id = select_supported_resource_id(self, "stream", item)?;
-        let response = self.fetch_json::<RemoteStreamResponse>(format!(
-            "{}/stream/{}/{}.json",
-            self.base_url,
-            media_type_to_remote(&item.media_type),
-            encode_path_value(&stream_id)
-        ));
+        let response = self.fetch_json_budgeted::<RemoteStreamResponse>(
+            format!(
+                "{}/stream/{}/{}.json",
+                self.base_url,
+                media_type_to_remote(&item.media_type),
+                encode_path_value(&stream_id)
+            ),
+            started,
+            REMOTE_STREAM_LOOKUP_BUDGET,
+        );
         if started.elapsed() >= REMOTE_STREAM_LOOKUP_BUDGET {
             eprintln!(
                 "[perf] addon.stream_lookup budget reached for {} ({})",
@@ -1015,7 +1071,7 @@ impl SolAddon for RemoteHttpAddon {
                 );
                 return None;
             }
-            if let Some(item) = self.fetch_item_meta(media_type, id) {
+            if let Some(item) = self.fetch_item_meta(media_type, id, started) {
                 return Some(item);
             }
         }
@@ -1040,6 +1096,10 @@ impl SolAddon for RemoteHttpAddon {
             .streams
             .into_iter()
             .filter_map(map_remote_stream_source_release)
+            .map(|mut release| {
+                release.indexer = self.manifest.name.clone();
+                release
+            })
             .map(|release| StreamCandidate {
                 name: release.title.clone(),
                 detail: format!(
@@ -1243,6 +1303,10 @@ struct RemoteMetaPreview {
     id: String,
     #[serde(rename = "type")]
     media_type: Option<String>,
+    #[serde(rename = "imdb_id", alias = "imdbId", default)]
+    imdb_id: Option<String>,
+    #[serde(rename = "tmdb_id", alias = "tmdbId", default)]
+    tmdb_id: Option<serde_json::Value>,
     #[serde(alias = "name")]
     title: String,
     #[serde(default)]
@@ -1275,6 +1339,8 @@ struct RemoteStream {
     external_url: Option<String>,
     #[serde(rename = "infoHash", default)]
     info_hash: Option<String>,
+    #[serde(rename = "fileIdx", default)]
+    file_idx: Option<i64>,
 }
 
 fn unavailable_placeholder() -> MediaItem {
@@ -1387,15 +1453,17 @@ fn remote_supported_types(manifest: &RemoteManifest) -> Vec<MediaType> {
 }
 
 fn map_remote_meta_preview(meta: RemoteMetaPreview) -> Option<MediaItem> {
+    let media_type = parse_remote_media_type(meta.media_type.as_deref())?;
+    let alternate_ids = remote_meta_alternate_ids(&meta, &media_type);
     let poster_url = meta.poster.clone().unwrap_or_default();
     Some(MediaItem {
         id: meta.id,
-        alternate_ids: vec![],
+        alternate_ids,
         title: meta.title,
         description: meta
             .description
             .unwrap_or_else(|| "No description provided by addon.".into()),
-        media_type: parse_remote_media_type(meta.media_type.as_deref())?,
+        media_type,
         genres: meta.genres.unwrap_or_default(),
         poster_url,
         backdrop_url: meta.background.or(meta.poster).unwrap_or_default(),
@@ -1409,16 +1477,51 @@ fn map_remote_meta_value(value: serde_json::Value) -> Option<MediaItem> {
     map_remote_meta_preview(preview)
 }
 
+fn remote_meta_alternate_ids(meta: &RemoteMetaPreview, media_type: &MediaType) -> Vec<String> {
+    let mut ids = Vec::new();
+
+    if let Some(imdb_id) = meta
+        .imdb_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| value.starts_with("tt"))
+    {
+        ids.push(imdb_id.to_string());
+    }
+
+    if let Some(tmdb_id) = meta.tmdb_id.as_ref().and_then(tmdb_id_from_value) {
+        ids.push(format!(
+            "tmdb:{}:{tmdb_id}",
+            media_type_to_remote(media_type)
+        ));
+    }
+
+    ids.dedup();
+    ids
+}
+
+fn tmdb_id_from_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        serde_json::Value::String(text) => {
+            let trimmed = text.trim();
+            (!trimmed.is_empty()).then_some(trimmed.to_string())
+        }
+        _ => None,
+    }
+}
+
 fn map_remote_stream_source(stream: RemoteStream) -> Option<StreamSource> {
     let display_name = stream
         .name
         .clone()
         .or(stream.title.clone())
         .unwrap_or_else(|| "Remote stream".into());
-    let full_title = stream
-        .title
-        .clone()
-        .unwrap_or_else(|| display_name.clone());
+    let full_title = stream.title.clone().unwrap_or_else(|| display_name.clone());
+    let fallback_magnet = stream
+        .info_hash
+        .as_deref()
+        .map(|hash| magnet_from_info_hash(hash, stream.file_idx, Some(&full_title)));
     let (url, playback_kind, playback_note) = match (stream.url, stream.external_url) {
         (Some(url), _) if url.starts_with("http://") => (
             url,
@@ -1441,6 +1544,11 @@ fn map_remote_stream_source(stream: RemoteStream) -> Option<StreamSource> {
             url,
             "external".to_string(),
             "This source opens outside the app.".to_string(),
+        ),
+        (None, None) if fallback_magnet.is_some() => (
+            fallback_magnet.expect("checked is_some"),
+            "external".to_string(),
+            "This source needs torrent/debrid handoff before playback.".to_string(),
         ),
         (None, None) => return None,
     };
@@ -1485,7 +1593,8 @@ fn map_remote_stream_source_release(stream: RemoteStream) -> Option<SourceReleas
 
     let magnet_url = stream
         .info_hash
-        .map(|hash| format!("magnet:?xt=urn:btih:{hash}"))
+        .as_deref()
+        .map(|hash| magnet_from_info_hash(hash, stream.file_idx, Some(&title)))
         .or_else(|| stream.url.filter(|value| value.starts_with("magnet:?")))
         .or_else(|| {
             stream
@@ -1507,6 +1616,19 @@ fn map_remote_stream_source_release(stream: RemoteStream) -> Option<SourceReleas
         age: "unknown".into(),
         magnet_url,
     })
+}
+
+fn magnet_from_info_hash(hash: &str, file_idx: Option<i64>, title: Option<&str>) -> String {
+    let mut magnet = format!("magnet:?xt=urn:btih:{}", hash.trim());
+    if let Some(title) = title.map(str::trim).filter(|value| !value.is_empty()) {
+        magnet.push_str("&dn=");
+        magnet.push_str(&encode_path_value(title));
+    }
+    if let Some(file_idx) = file_idx {
+        magnet.push_str("&so=");
+        magnet.push_str(&file_idx.to_string());
+    }
+    magnet
 }
 
 fn parse_release_year(value: Option<&str>) -> u16 {
@@ -1576,11 +1698,7 @@ fn remote_addon_priority(descriptor: &AddonDescriptor) -> u8 {
         descriptor.source.to_ascii_lowercase()
     );
 
-    if haystack.contains("torbox") {
-        0
-    } else {
-        1
-    }
+    if haystack.contains("torbox") { 0 } else { 1 }
 }
 
 fn include_addon_in_discovery(addon: &Arc<dyn SolAddon>) -> bool {
@@ -1597,6 +1715,11 @@ fn include_addon_in_discovery(addon: &Arc<dyn SolAddon>) -> bool {
     );
 
     !haystack.contains("torbox")
+}
+
+fn remaining_budget_timeout(started: Instant, budget: Duration) -> Option<Duration> {
+    let remaining = budget.checked_sub(started.elapsed())?;
+    (remaining >= REMOTE_MIN_REQUEST_TIMEOUT).then_some(remaining)
 }
 
 fn log_addon_timing(operation: &str, addon: &Arc<dyn SolAddon>, elapsed: Duration) {
@@ -1617,10 +1740,10 @@ mod tests {
     use reqwest::blocking::Client;
 
     use super::{
-        AddonRegistry, ProwlarrSearchAddon, RemoteHttpAddon, RemoteManifest, RemoteResourceEntry,
-        RemoteResourceObject, RemoteStream, SolAddon, dedupe_stream_sources,
-        map_remote_stream_source_release,
-        media_id_candidates, remote_addon_priority, select_supported_resource_id,
+        AddonRegistry, RemoteHttpAddon, RemoteManifest, RemoteResourceEntry, RemoteResourceObject,
+        RemoteStream, dedupe_stream_sources, map_remote_stream_source,
+        map_remote_stream_source_release, media_id_candidates, remote_addon_priority,
+        select_supported_resource_id,
     };
     use crate::domain::{AddonDescriptor, AddonTransport, MediaItem, MediaType, StreamSource};
 
@@ -1733,33 +1856,28 @@ mod tests {
             url: None,
             external_url: None,
             info_hash: Some("ABC123".into()),
+            file_idx: None,
         })
         .expect("info hash should produce a source release");
 
-        assert_eq!(release.magnet_url, "magnet:?xt=urn:btih:ABC123");
+        assert_eq!(release.magnet_url, "magnet:?xt=urn:btih:ABC123&dn=Release");
     }
 
     #[test]
-    fn unconfigured_prowlarr_does_not_participate_in_source_search() {
-        let addon = ProwlarrSearchAddon::new();
-        if addon.provider.is_configured() {
-            return;
-        }
+    fn map_remote_stream_source_accepts_info_hash() {
+        let stream = map_remote_stream_source(RemoteStream {
+            name: Some("AIOStreams".into()),
+            title: Some("AIO stream".into()),
+            url: None,
+            external_url: None,
+            info_hash: Some("DEF456".into()),
+            file_idx: Some(3),
+        })
+        .expect("info hash should produce stream source");
 
-        let item = MediaItem {
-            id: "tmdb:movie:123".into(),
-            alternate_ids: vec![],
-            title: "Test".into(),
-            description: String::new(),
-            media_type: MediaType::Movie,
-            genres: vec![],
-            poster_url: String::new(),
-            backdrop_url: String::new(),
-            year: 2026,
-            streams: vec![],
-        };
-
-        assert!(addon.source_search(&item).is_none());
+        assert_eq!(stream.playback_kind, "external");
+        assert!(stream.url.starts_with("magnet:?xt=urn:btih:DEF456"));
+        assert!(stream.url.contains("&so=3"));
     }
 
     #[test]

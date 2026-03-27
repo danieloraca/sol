@@ -84,10 +84,7 @@ async fn streams(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Vec<crate::domain::StreamSource>>, StatusCode> {
-    state
-        .streams(&id)
-        .map(Json)
-        .ok_or(StatusCode::NOT_FOUND)
+    state.streams(&id).map(Json).ok_or(StatusCode::NOT_FOUND)
 }
 
 fn parse_media_type(raw: &String) -> Option<MediaType> {

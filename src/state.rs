@@ -51,7 +51,8 @@ impl AppState {
         magnet: &str,
         only_if_cached: bool,
     ) -> Option<AcquisitionResult> {
-        self.services.submit_torbox_magnet(id, magnet, only_if_cached)
+        self.services
+            .submit_torbox_magnet(id, magnet, only_if_cached)
     }
 
     pub fn addons(&self) -> Vec<AddonDescriptor> {
@@ -67,14 +68,19 @@ impl AppState {
         manifest_url: &str,
         enabled: bool,
     ) -> Result<(), String> {
-        self.services.set_remote_addon_enabled(manifest_url, enabled)
+        self.services
+            .set_remote_addon_enabled(manifest_url, enabled)
     }
 
     pub fn remove_remote_addon(&self, manifest_url: &str) -> Result<(), String> {
         self.services.remove_remote_addon(manifest_url)
     }
 
-    pub fn move_remote_addon(&self, manifest_url: &str, direction: MoveDirection) -> Result<(), String> {
+    pub fn move_remote_addon(
+        &self,
+        manifest_url: &str,
+        direction: MoveDirection,
+    ) -> Result<(), String> {
         self.services.move_remote_addon(manifest_url, direction)
     }
 }

@@ -1,11 +1,9 @@
-use tauri::Manager;
 use std::process::Command;
+use tauri::Manager;
 
 use crate::{
     addons::MoveDirection,
-    domain::{
-        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, StreamLookup, StreamSource,
-    },
+    domain::{AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, StreamLookup, StreamSource},
     state::AppState,
 };
 
@@ -103,10 +101,7 @@ async fn get_media_item(
 }
 
 #[tauri::command]
-fn get_streams(
-    state: tauri::State<'_, AppState>,
-    id: String,
-) -> Result<Vec<StreamSource>, String> {
+fn get_streams(state: tauri::State<'_, AppState>, id: String) -> Result<Vec<StreamSource>, String> {
     state
         .streams(&id)
         .ok_or_else(|| format!("No streams found for {id}"))

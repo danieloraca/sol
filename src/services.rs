@@ -79,7 +79,11 @@ impl AppServices {
         }
 
         let started = Instant::now();
-        let feed = self.addons.read().expect("addon registry read lock").home_feed();
+        let feed = self
+            .addons
+            .read()
+            .expect("addon registry read lock")
+            .home_feed();
         self.cache
             .write()
             .expect("service cache write lock")
@@ -185,7 +189,11 @@ impl AppServices {
         }
 
         let started = Instant::now();
-        let item = self.addons.read().expect("addon registry read lock").item(id)?;
+        let item = self
+            .addons
+            .read()
+            .expect("addon registry read lock")
+            .item(id)?;
         let mut cache = self.cache.write().expect("service cache write lock");
         if cache.item.len() >= CACHE_MAX_ENTRIES {
             cache.item.clear();
@@ -275,34 +283,36 @@ impl AppServices {
             .remote_addons()
             .into_iter()
             .map(|stored| {
-                descriptors.remove(&stored.manifest_url).unwrap_or(AddonDescriptor {
-                    id: if stored.id.is_empty() {
-                        stored.manifest_url.clone()
-                    } else {
-                        stored.id.clone()
-                    },
-                    name: if stored.name.is_empty() {
-                        "Remote addon".into()
-                    } else {
-                        stored.name.clone()
-                    },
-                    version: stored.version.clone(),
-                    transport: crate::domain::AddonTransport::Remote,
-                    enabled: stored.enabled,
-                    configured: true,
-                    health_status: if stored.enabled {
-                        "error".into()
-                    } else {
-                        "disabled".into()
-                    },
-                    health_message: if stored.enabled {
-                        "Sol could not load this addon manifest right now.".into()
-                    } else {
-                        "This addon is disabled in Sol.".into()
-                    },
-                    capabilities: stored.capabilities.clone(),
-                    source: stored.manifest_url.clone(),
-                })
+                descriptors
+                    .remove(&stored.manifest_url)
+                    .unwrap_or(AddonDescriptor {
+                        id: if stored.id.is_empty() {
+                            stored.manifest_url.clone()
+                        } else {
+                            stored.id.clone()
+                        },
+                        name: if stored.name.is_empty() {
+                            "Remote addon".into()
+                        } else {
+                            stored.name.clone()
+                        },
+                        version: stored.version.clone(),
+                        transport: crate::domain::AddonTransport::Remote,
+                        enabled: stored.enabled,
+                        configured: true,
+                        health_status: if stored.enabled {
+                            "error".into()
+                        } else {
+                            "disabled".into()
+                        },
+                        health_message: if stored.enabled {
+                            "Sol could not load this addon manifest right now.".into()
+                        } else {
+                            "This addon is disabled in Sol.".into()
+                        },
+                        capabilities: stored.capabilities.clone(),
+                        source: stored.manifest_url.clone(),
+                    })
             })
             .collect::<Vec<_>>();
 
@@ -340,7 +350,11 @@ impl AppServices {
         Ok(())
     }
 
-    pub fn move_remote_addon(&self, manifest_url: &str, direction: MoveDirection) -> Result<(), String> {
+    pub fn move_remote_addon(
+        &self,
+        manifest_url: &str,
+        direction: MoveDirection,
+    ) -> Result<(), String> {
         self.store.move_remote_addon(manifest_url, direction)?;
         self.reload_registry();
         Ok(())
@@ -350,7 +364,10 @@ impl AppServices {
         let urls = self.store.enabled_urls();
         *self.addons.write().expect("addon registry write lock") =
             AddonRegistry::from_manifest_urls(&urls);
-        self.cache.write().expect("service cache write lock").clear();
+        self.cache
+            .write()
+            .expect("service cache write lock")
+            .clear();
     }
 }
 

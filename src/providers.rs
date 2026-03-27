@@ -177,7 +177,10 @@ impl SourceSearchProvider for SeededLibraryProvider {
         SourceSearchResult {
             provider: "Demo".into(),
             status: "unavailable".into(),
-            message: format!("No external source search is configured for {}.", item.title),
+            message: format!(
+                "No external source search is configured for {}.",
+                item.title
+            ),
             releases: vec![],
         }
     }
@@ -212,7 +215,11 @@ impl TmdbMetadataProvider {
     fn new(auth: TmdbAuth) -> Self {
         Self {
             client: Client::builder()
-                .user_agent(format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")))
+                .user_agent(format!(
+                    "{}/{}",
+                    env!("CARGO_PKG_NAME"),
+                    env!("CARGO_PKG_VERSION")
+                ))
                 .connect_timeout(Duration::from_secs(2))
                 .timeout(Duration::from_secs(5))
                 .build()
@@ -312,8 +319,10 @@ impl TmdbMetadataProvider {
     {
         let url = format!("{TMDB_API_BASE}{path}");
         let mut builder = self.client.get(url).header(ACCEPT, "application/json");
-        let mut query: Vec<(String, String)> =
-            params.iter().map(|(key, value)| ((*key).into(), value.clone())).collect();
+        let mut query: Vec<(String, String)> = params
+            .iter()
+            .map(|(key, value)| ((*key).into(), value.clone()))
+            .collect();
 
         match &self.auth {
             TmdbAuth::Bearer(token) => {
@@ -345,7 +354,9 @@ impl TmdbMetadataProvider {
             id: tmdb_movie_id(movie.id),
             alternate_ids: vec![],
             title: movie.title,
-            description: movie.overview.unwrap_or_else(|| "No overview available yet.".into()),
+            description: movie
+                .overview
+                .unwrap_or_else(|| "No overview available yet.".into()),
             media_type: MediaType::Movie,
             genres,
             poster_url: self.poster_url(movie.poster_path.as_deref()),
@@ -364,7 +375,9 @@ impl TmdbMetadataProvider {
                 .filter(|value| !value.trim().is_empty())
                 .collect(),
             title: movie.title,
-            description: movie.overview.unwrap_or_else(|| "No overview available yet.".into()),
+            description: movie
+                .overview
+                .unwrap_or_else(|| "No overview available yet.".into()),
             media_type: MediaType::Movie,
             genres: movie.genres.into_iter().map(|genre| genre.name).collect(),
             poster_url: self.poster_url(movie.poster_path.as_deref()),
@@ -466,7 +479,11 @@ impl TorboxStreamProvider {
                 .ok()
                 .filter(|value| !value.trim().is_empty()),
             client: Client::builder()
-                .user_agent(format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")))
+                .user_agent(format!(
+                    "{}/{}",
+                    env!("CARGO_PKG_NAME"),
+                    env!("CARGO_PKG_VERSION")
+                ))
                 .connect_timeout(Duration::from_secs(2))
                 .timeout(Duration::from_secs(5))
                 .build()
@@ -516,7 +533,11 @@ impl TorboxStreamProvider {
             .unwrap_or_default()
     }
 
-    fn best_match<'a>(&self, item: &MediaItem, torrents: &'a [TorboxTorrent]) -> Option<&'a TorboxTorrent> {
+    fn best_match<'a>(
+        &self,
+        item: &MediaItem,
+        torrents: &'a [TorboxTorrent],
+    ) -> Option<&'a TorboxTorrent> {
         let item_title = normalize_title(&item.title);
 
         torrents
@@ -525,7 +546,13 @@ impl TorboxStreamProvider {
                 let score = score_torrent_match(torrent, &item_title, item.year);
                 (score > 0).then_some((score, torrent))
             })
-            .max_by_key(|(score, torrent)| (*score, torrent.cached as i32, torrent.download_finished as i32))
+            .max_by_key(|(score, torrent)| {
+                (
+                    *score,
+                    torrent.cached as i32,
+                    torrent.download_finished as i32,
+                )
+            })
             .map(|(_, torrent)| torrent)
     }
 
@@ -605,21 +632,22 @@ impl TorboxStreamProvider {
                     provider: "TorBox".into(),
                     status: "request_failed".into(),
                     message: "TorBox could not be reached while sending this magnet.".into(),
-                }
+                };
             }
         };
 
         let status = response.status();
-        let parsed = match response.json::<TorboxResponse<TorboxCreateTorrentData>>() {
-            Ok(parsed) => parsed,
-            Err(_) => {
-                return AcquisitionResult {
+        let parsed =
+            match response.json::<TorboxResponse<TorboxCreateTorrentData>>() {
+                Ok(parsed) => parsed,
+                Err(_) => return AcquisitionResult {
                     provider: "TorBox".into(),
                     status: "bad_response".into(),
-                    message: "TorBox accepted the magnet request but returned an unreadable response.".into(),
-                }
-            }
-        };
+                    message:
+                        "TorBox accepted the magnet request but returned an unreadable response."
+                            .into(),
+                },
+            };
 
         if parsed.success {
             let detail = parsed
@@ -678,7 +706,9 @@ impl StreamProvider for TorboxStreamProvider {
             return StreamLookup {
                 provider: "TorBox".into(),
                 status: "no_library_items".into(),
-                message: "TorBox did not return any cached or finished video items from your library.".into(),
+                message:
+                    "TorBox did not return any cached or finished video items from your library."
+                        .into(),
                 streams: vec![],
                 candidates: vec![],
             };
@@ -702,7 +732,10 @@ impl StreamProvider for TorboxStreamProvider {
             return StreamLookup {
                 provider: "TorBox".into(),
                 status: "no_video_file".into(),
-                message: format!("TorBox found \"{}\" but no playable video file was detected.", torrent.name),
+                message: format!(
+                    "TorBox found \"{}\" but no playable video file was detected.",
+                    torrent.name
+                ),
                 streams: vec![],
                 candidates,
             };
@@ -749,7 +782,10 @@ impl StreamProvider for TorboxStreamProvider {
             message: format!("Streaming from TorBox item \"{}\".", torrent.name),
             streams: vec![StreamSource {
                 provider: "TorBox".into(),
-                name: format!("TorBox • {}", file.short_name.as_deref().unwrap_or(&file.name)),
+                name: format!(
+                    "TorBox • {}",
+                    file.short_name.as_deref().unwrap_or(&file.name)
+                ),
                 full_title: torrent.name.clone(),
                 details: torbox_stream_details(&stream.metadata, file, torrent),
                 quality,
@@ -775,7 +811,11 @@ impl ProwlarrSourceProvider {
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
             client: Client::builder()
-                .user_agent(format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")))
+                .user_agent(format!(
+                    "{}/{}",
+                    env!("CARGO_PKG_NAME"),
+                    env!("CARGO_PKG_VERSION")
+                ))
                 .connect_timeout(Duration::from_secs(2))
                 .timeout(Duration::from_secs(5))
                 .build()
@@ -829,7 +869,8 @@ impl SourceSearchProvider for ProwlarrSourceProvider {
             return SourceSearchResult {
                 provider: "Prowlarr".into(),
                 status: "unavailable".into(),
-                message: "Set PROWLARR_URL and PROWLARR_API_KEY to search releases automatically.".into(),
+                message: "Set PROWLARR_URL and PROWLARR_API_KEY to search releases automatically."
+                    .into(),
                 releases: vec![],
             };
         }
@@ -852,7 +893,10 @@ impl SourceSearchProvider for ProwlarrSourceProvider {
             return SourceSearchResult {
                 provider: "Prowlarr".into(),
                 status: "no_results".into(),
-                message: format!("Prowlarr did not return any addable torrent releases for {}.", item.title),
+                message: format!(
+                    "Prowlarr did not return any addable torrent releases for {}.",
+                    item.title
+                ),
                 releases: vec![],
             };
         }
@@ -862,7 +906,11 @@ impl SourceSearchProvider for ProwlarrSourceProvider {
         SourceSearchResult {
             provider: "Prowlarr".into(),
             status: "ready".into(),
-            message: format!("Found {} release candidates for {}.", mapped.len(), item.title),
+            message: format!(
+                "Found {} release candidates for {}.",
+                mapped.len(),
+                item.title
+            ),
             releases: mapped,
         }
     }
@@ -1053,7 +1101,11 @@ fn torbox_stream_details(
 ) -> Vec<String> {
     let mut details = Vec::new();
 
-    if let Some(codec) = metadata.video.as_ref().and_then(|video| video.codec.clone()) {
+    if let Some(codec) = metadata
+        .video
+        .as_ref()
+        .and_then(|video| video.codec.clone())
+    {
         details.push(format!("Video: {codec}"));
     }
 
@@ -1148,7 +1200,13 @@ fn unavailable_placeholder() -> MediaItem {
 fn normalize_title(value: &str) -> String {
     value
         .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { ' ' })
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -1180,7 +1238,11 @@ fn score_torrent_match(torrent: &TorboxTorrent, normalized_title: &str, year: u1
         }
     }
 
-    if torrent.files.iter().any(|file| normalize_title(&file.name).contains(normalized_title)) {
+    if torrent
+        .files
+        .iter()
+        .any(|file| normalize_title(&file.name).contains(normalized_title))
+    {
         score += 25;
     }
 
@@ -1227,7 +1289,11 @@ fn map_prowlarr_release(release: ProwlarrSearchRelease) -> Option<SourceRelease>
     let magnet_url = release
         .magnet_url
         .or_else(|| release.guid.filter(|value| value.starts_with("magnet:?")))
-        .or_else(|| release.download_url.filter(|value| value.starts_with("magnet:?")))?;
+        .or_else(|| {
+            release
+                .download_url
+                .filter(|value| value.starts_with("magnet:?"))
+        })?;
 
     let size = release
         .size
@@ -1516,8 +1582,9 @@ mod tests {
 
     #[test]
     fn fallback_metadata_provider_uses_seeded_results_when_primary_is_empty() {
-        let primary: Arc<dyn MetadataProvider> =
-            Arc::new(TmdbMetadataProvider::new(super::TmdbAuth::ApiKey("demo".into())));
+        let primary: Arc<dyn MetadataProvider> = Arc::new(TmdbMetadataProvider::new(
+            super::TmdbAuth::ApiKey("demo".into()),
+        ));
         let fallback: Arc<dyn MetadataProvider> = Arc::new(SeededLibraryProvider::demo());
         let provider = FallbackMetadataProvider::new(primary, fallback);
 
