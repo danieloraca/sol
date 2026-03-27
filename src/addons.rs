@@ -28,6 +28,11 @@ const REMOTE_CATALOG_ITEM_LIMIT: usize = 240;
 const REMOTE_SEARCH_CATALOG_LIMIT: usize = 14;
 const REMOTE_SEARCH_ITEM_LIMIT: usize = 320;
 const ADDON_PERF_LOG_THRESHOLD_MS: u128 = 120;
+const REMOTE_HOME_BUDGET: Duration = Duration::from_millis(2800);
+const REMOTE_CATALOG_BUDGET: Duration = Duration::from_millis(3200);
+const REMOTE_SEARCH_BUDGET: Duration = Duration::from_millis(3500);
+const REMOTE_ITEM_BUDGET: Duration = Duration::from_millis(2200);
+const REMOTE_STREAM_LOOKUP_BUDGET: Duration = Duration::from_millis(2200);
 
 pub trait SolAddon: Send + Sync {
     fn descriptor(&self) -> AddonDescriptor;
@@ -821,28 +826,45 @@ impl RemoteHttpAddon {
         media_type: Option<MediaType>,
         catalog_limit: usize,
         item_limit: usize,
+        budget: Duration,
     ) -> Vec<MediaItem> {
         if !self.supports_resource("catalog", media_type.clone(), None) {
             return vec![];
         }
 
-        self.catalogs_for(media_type, false)
-            .into_iter()
-            .take(catalog_limit)
-            .filter_map(|catalog| {
-                self.fetch_json::<RemoteCatalogResponse>(format!(
-                    "{}/catalog/{}/{}.json",
-                    self.base_url, catalog.catalog_type, catalog.id
-                ))
-            })
-            .flat_map(|response| response.metas)
-            .filter_map(map_remote_meta_preview)
-            .take(item_limit)
-            .collect()
+        let started = Instant::now();
+        let mut items = Vec::new();
+        for catalog in self.catalogs_for(media_type, false).into_iter().take(catalog_limit) {
+            if started.elapsed() >= budget || items.len() >= item_limit {
+                break;
+            }
+            if let Some(response) = self.fetch_json::<RemoteCatalogResponse>(format!(
+                "{}/catalog/{}/{}.json",
+                self.base_url, catalog.catalog_type, catalog.id
+            )) {
+                items.extend(response.metas.into_iter().filter_map(map_remote_meta_preview));
+                if items.len() >= item_limit {
+                    break;
+                }
+            }
+        }
+        if started.elapsed() >= budget {
+            eprintln!(
+                "[perf] addon.catalog budget reached for {} ({})",
+                self.manifest.name, self.manifest.id
+            );
+        }
+        items.truncate(item_limit);
+        items
     }
 
     fn catalog_items(&self, media_type: Option<MediaType>) -> Vec<MediaItem> {
-        self.catalog_items_with_limit(media_type, REMOTE_CATALOG_LIMIT, REMOTE_CATALOG_ITEM_LIMIT)
+        self.catalog_items_with_limit(
+            media_type,
+            REMOTE_CATALOG_LIMIT,
+            REMOTE_CATALOG_ITEM_LIMIT,
+            REMOTE_CATALOG_BUDGET,
+        )
     }
 
     fn search_items(&self, query: &str) -> Vec<MediaItem> {
@@ -850,22 +872,37 @@ impl RemoteHttpAddon {
             return self.catalog_items(None);
         }
 
-        self.catalogs_for(None, true)
+        let started = Instant::now();
+        let mut items = Vec::new();
+        for catalog in self
+            .catalogs_for(None, true)
             .into_iter()
             .take(REMOTE_SEARCH_CATALOG_LIMIT)
-            .filter_map(|catalog| {
-                self.fetch_json::<RemoteCatalogResponse>(format!(
-                    "{}/catalog/{}/{}/search={}.json",
-                    self.base_url,
-                    catalog.catalog_type,
-                    catalog.id,
-                    encode_path_value(query)
-                ))
-            })
-            .flat_map(|response| response.metas)
-            .filter_map(map_remote_meta_preview)
-            .take(REMOTE_SEARCH_ITEM_LIMIT)
-            .collect()
+        {
+            if started.elapsed() >= REMOTE_SEARCH_BUDGET || items.len() >= REMOTE_SEARCH_ITEM_LIMIT {
+                break;
+            }
+            if let Some(response) = self.fetch_json::<RemoteCatalogResponse>(format!(
+                "{}/catalog/{}/{}/search={}.json",
+                self.base_url,
+                catalog.catalog_type,
+                catalog.id,
+                encode_path_value(query)
+            )) {
+                items.extend(response.metas.into_iter().filter_map(map_remote_meta_preview));
+                if items.len() >= REMOTE_SEARCH_ITEM_LIMIT {
+                    break;
+                }
+            }
+        }
+        if started.elapsed() >= REMOTE_SEARCH_BUDGET {
+            eprintln!(
+                "[perf] addon.search budget reached for {} ({})",
+                self.manifest.name, self.manifest.id
+            );
+        }
+        items.truncate(REMOTE_SEARCH_ITEM_LIMIT);
+        items
     }
 
     fn fetch_item_meta(&self, media_type: MediaType, id: &str) -> Option<MediaItem> {
@@ -896,14 +933,24 @@ impl RemoteHttpAddon {
     }
 
     fn stream_response(&self, item: &MediaItem) -> Option<RemoteStreamResponse> {
+        let started = Instant::now();
+        if started.elapsed() >= REMOTE_STREAM_LOOKUP_BUDGET {
+            return None;
+        }
         let stream_id = select_supported_resource_id(self, "stream", item)?;
-
-        self.fetch_json::<RemoteStreamResponse>(format!(
+        let response = self.fetch_json::<RemoteStreamResponse>(format!(
             "{}/stream/{}/{}.json",
             self.base_url,
             media_type_to_remote(&item.media_type),
             encode_path_value(&stream_id)
-        ))
+        ));
+        if started.elapsed() >= REMOTE_STREAM_LOOKUP_BUDGET {
+            eprintln!(
+                "[perf] addon.stream_lookup budget reached for {} ({})",
+                self.manifest.name, self.manifest.id
+            );
+        }
+        response
     }
 }
 
@@ -928,6 +975,7 @@ impl SolAddon for RemoteHttpAddon {
             None,
             REMOTE_HOME_CATALOG_LIMIT,
             REMOTE_HOME_ITEM_LIMIT,
+            REMOTE_HOME_BUDGET,
         );
         if items.is_empty() {
             return None;
@@ -955,7 +1003,15 @@ impl SolAddon for RemoteHttpAddon {
     }
 
     fn item(&self, id: &str) -> Option<MediaItem> {
+        let started = Instant::now();
         for media_type in remote_supported_types(&self.manifest) {
+            if started.elapsed() >= REMOTE_ITEM_BUDGET {
+                eprintln!(
+                    "[perf] addon.item budget reached for {} ({})",
+                    self.manifest.name, self.manifest.id
+                );
+                return None;
+            }
             if let Some(item) = self.fetch_item_meta(media_type, id) {
                 return Some(item);
             }

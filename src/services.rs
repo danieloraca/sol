@@ -22,6 +22,7 @@ pub struct AppServices {
 const HOME_FEED_TTL: Duration = Duration::from_secs(20);
 const CATALOG_TTL: Duration = Duration::from_secs(20);
 const SEARCH_TTL: Duration = Duration::from_secs(20);
+const ITEM_TTL: Duration = Duration::from_secs(30);
 const STREAM_LOOKUP_TTL: Duration = Duration::from_secs(10);
 const PERF_LOG_THRESHOLD_MS: u128 = 120;
 const CACHE_MAX_ENTRIES: usize = 128;
@@ -37,6 +38,7 @@ struct ServiceCache {
     home_feed: Option<CacheEntry<HomeFeed>>,
     catalog: HashMap<String, CacheEntry<Vec<MediaItem>>>,
     search: HashMap<String, CacheEntry<Vec<MediaItem>>>,
+    item: HashMap<String, CacheEntry<MediaItem>>,
     stream_lookup: HashMap<String, CacheEntry<StreamLookup>>,
 }
 
@@ -45,6 +47,7 @@ impl ServiceCache {
         self.home_feed = None;
         self.catalog.clear();
         self.search.clear();
+        self.item.clear();
         self.stream_lookup.clear();
     }
 }
@@ -168,7 +171,34 @@ impl AppServices {
     }
 
     pub fn item(&self, id: &str) -> Option<MediaItem> {
-        self.addons.read().expect("addon registry read lock").item(id)
+        let now = Instant::now();
+        if let Some(item) = self
+            .cache
+            .read()
+            .expect("service cache read lock")
+            .item
+            .get(id)
+            .filter(|entry| entry.expires_at > now)
+            .map(|entry| entry.value.clone())
+        {
+            return Some(item);
+        }
+
+        let started = Instant::now();
+        let item = self.addons.read().expect("addon registry read lock").item(id)?;
+        let mut cache = self.cache.write().expect("service cache write lock");
+        if cache.item.len() >= CACHE_MAX_ENTRIES {
+            cache.item.clear();
+        }
+        cache.item.insert(
+            id.to_string(),
+            CacheEntry {
+                value: item.clone(),
+                expires_at: Instant::now() + ITEM_TTL,
+            },
+        );
+        log_perf("item", started);
+        Some(item)
     }
 
     pub fn streams(&self, id: &str) -> Option<Vec<StreamSource>> {
@@ -191,8 +221,8 @@ impl AppServices {
         }
 
         let started = Instant::now();
+        let item = self.item(id)?;
         let registry = self.addons.read().expect("addon registry read lock");
-        let item = registry.item(id)?;
         let lookup = registry.stream_lookup(&item);
         let mut cache = self.cache.write().expect("service cache write lock");
         if cache.stream_lookup.len() >= CACHE_MAX_ENTRIES {
@@ -216,8 +246,8 @@ impl AppServices {
         only_if_cached: bool,
     ) -> Option<AcquisitionResult> {
         let started = Instant::now();
+        let item = self.item(id)?;
         let registry = self.addons.read().expect("addon registry read lock");
-        let item = registry.item(id)?;
         let result = registry.submit_magnet(&item, magnet, only_if_cached);
 
         let mut cache = self.cache.write().expect("service cache write lock");
