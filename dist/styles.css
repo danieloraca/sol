@@ -516,6 +516,8 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 
 .card {
   padding: 18px;
+  box-shadow: none;
+  background: #10263c;
 }
 
 .catalog-empty {
@@ -531,6 +533,10 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
   color: inherit;
   text-align: left;
   cursor: pointer;
+  display: grid;
+  gap: 10px;
+  min-height: 100%;
+  align-content: start;
 }
 
 .poster {
@@ -578,6 +584,38 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 .player-details-card h3,
 .player-overlay h2 {
   margin: 0 0 8px;
+}
+
+.card h3 {
+  margin: 0;
+  font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  font-size: clamp(1.05rem, 1.55vw, 1.55rem);
+  line-height: 1.04;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  min-height: calc(1.04em * 2);
+}
+
+.card .meta {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.card-description {
+  margin-top: 2px;
+  margin-bottom: 0;
+  color: #c9d7ee;
+  line-height: 1.28;
+  font-size: 0.82rem;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  opacity: 0.92;
 }
 
 .meta,
@@ -1621,7 +1659,7 @@ body.is-settings-open {
 }
 
 .poster {
-  border-radius: var(--radius-surface-md);
+  border-radius: var(--radius-surface-lg);
 }
 
 .filter,

@@ -2409,6 +2409,8 @@ function formatDuration(totalSeconds) {
 function renderCard(item) {
   const mediaTypeLabel = formatMediaType(item.media_type);
   const showMediaBadge = mediaTypeLabel !== "Movie";
+  const genres = Array.isArray(item.genres) ? item.genres.slice(0, 2) : [];
+  const genreLine = genres.join(" / ");
   return `
     <article class="card">
       <button data-id="${item.id}">
@@ -2417,7 +2419,8 @@ function renderCard(item) {
           ${showMediaBadge ? `<span class="poster-label">${escapeHtml(mediaTypeLabel)}</span>` : ""}
         </div>
         <h3>${item.title}</h3>
-        <p class="meta">${item.year} • ${item.genres.join(" / ")}</p>
+        <p class="meta">${item.year}${genreLine ? ` • ${escapeHtml(genreLine)}` : ""}</p>
+        <p class="card-description">${escapeHtml(item.description || "")}</p>
       </button>
     </article>
   `;
