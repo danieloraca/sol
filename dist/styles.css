@@ -1279,16 +1279,45 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 }
 
 .settings-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 8, 16, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.settings-modal-dialog {
+  width: min(980px, 100%);
+  max-height: min(86vh, 960px);
+  overflow: auto;
   display: grid;
   gap: 12px;
-  padding: 16px;
+  padding: 18px;
   border: 1px solid var(--line);
-  border-radius: 18px;
-  background: rgba(8, 19, 31, 0.72);
+  border-radius: 22px;
+  background: rgba(8, 19, 31, 0.95);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
 }
 
 .settings-panel.is-hidden {
   display: none;
+}
+
+body.is-settings-open {
+  overflow: hidden;
+}
+
+.settings-modal-dialog button,
+.settings-modal-dialog input {
+  min-height: 44px;
+}
+
+.settings-modal-dialog :focus-visible {
+  outline: 2px solid rgba(125, 249, 208, 0.72);
+  outline-offset: 2px;
 }
 
 .player-shell {
@@ -1392,6 +1421,16 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 
   .topbar-search {
     grid-template-columns: 1fr;
+  }
+
+  .settings-panel {
+    padding: 10px;
+  }
+
+  .settings-modal-dialog {
+    max-height: 92vh;
+    padding: 14px;
+    border-radius: 18px;
   }
 }
 

@@ -65,7 +65,6 @@ let lastExecutedSearch = "";
 let isSearchViewActive = false;
 let currentPage = "main";
 let playerReturnPage = "main";
-let settingsReturnPage = "main";
 let selectItemRequestToken = 0;
 let fullscreenListenerBound = false;
 let isPlayerFullscreen = false;
@@ -145,30 +144,15 @@ async function bootstrap() {
   });
 
   settingsToggleEl?.addEventListener("click", () => {
-    if (currentPage === "settings") {
-      if (settingsReturnPage === "player") {
-        showPlayerView({ returnTo: playerReturnPage });
-        return;
-      }
-      if (settingsReturnPage === "search") {
-        showSearchView();
-        return;
-      }
-      showMainView();
-      return;
-    }
-    showSettingsView({ returnTo: currentPage });
+    toggleSettingsModal();
   });
   settingsBackEl?.addEventListener("click", () => {
-    if (settingsReturnPage === "player") {
-      showPlayerView({ returnTo: playerReturnPage });
-      return;
+    closeSettingsModal();
+  });
+  settingsViewEl?.addEventListener("click", (event) => {
+    if (event.target === settingsViewEl) {
+      closeSettingsModal();
     }
-    if (settingsReturnPage === "search") {
-      showSearchView();
-      return;
-    }
-    showMainView();
   });
 
   if (!fullscreenListenerBound) {
@@ -191,6 +175,10 @@ async function bootstrap() {
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && isPlayerFullscreen) {
         setPlayerFullscreen(false);
+        return;
+      }
+      if (event.key === "Escape" && isSettingsModalOpen()) {
+        closeSettingsModal();
       }
     });
 
@@ -546,13 +534,12 @@ function showSearchView() {
   if (!mainViewEl || !searchViewEl || !playerViewEl || !settingsViewEl) {
     return;
   }
+  closeSettingsModal();
   currentPage = "search";
   setPlayerFullscreen(false);
   isSearchViewActive = true;
-  settingsToggleEl?.setAttribute("aria-expanded", "false");
   mainViewEl.classList.add("is-hidden");
   playerViewEl.classList.add("is-hidden");
-  settingsViewEl.classList.add("is-hidden");
   searchViewEl.classList.remove("is-hidden");
   window.scrollTo(0, 0);
 }
@@ -561,13 +548,12 @@ function showMainView() {
   if (!mainViewEl || !searchViewEl || !playerViewEl || !settingsViewEl) {
     return;
   }
+  closeSettingsModal();
   currentPage = "main";
   setPlayerFullscreen(false);
   isSearchViewActive = false;
-  settingsToggleEl?.setAttribute("aria-expanded", "false");
   searchViewEl.classList.add("is-hidden");
   playerViewEl.classList.add("is-hidden");
-  settingsViewEl.classList.add("is-hidden");
   mainViewEl.classList.remove("is-hidden");
   window.scrollTo(0, 0);
 }
@@ -576,33 +562,45 @@ function showPlayerView(options = {}) {
   if (!mainViewEl || !searchViewEl || !playerViewEl || !settingsViewEl) {
     return;
   }
+  closeSettingsModal();
   const { returnTo = currentPage === "search" ? "search" : "main" } = options;
   playerReturnPage = returnTo;
   currentPage = "player";
   isSearchViewActive = false;
-  settingsToggleEl?.setAttribute("aria-expanded", "false");
   mainViewEl.classList.add("is-hidden");
   searchViewEl.classList.add("is-hidden");
-  settingsViewEl.classList.add("is-hidden");
   playerViewEl.classList.remove("is-hidden");
   window.scrollTo(0, 0);
 }
 
-function showSettingsView(options = {}) {
-  if (!mainViewEl || !searchViewEl || !playerViewEl || !settingsViewEl) {
+function toggleSettingsModal() {
+  if (isSettingsModalOpen()) {
+    closeSettingsModal();
     return;
   }
-  const { returnTo = currentPage === "search" ? "search" : "main" } = options;
-  settingsReturnPage = returnTo === "settings" ? "main" : returnTo;
-  currentPage = "settings";
-  setPlayerFullscreen(false);
-  isSearchViewActive = false;
-  settingsToggleEl?.setAttribute("aria-expanded", "true");
-  mainViewEl.classList.add("is-hidden");
-  searchViewEl.classList.add("is-hidden");
-  playerViewEl.classList.add("is-hidden");
+  openSettingsModal();
+}
+
+function openSettingsModal() {
+  if (!settingsViewEl) {
+    return;
+  }
   settingsViewEl.classList.remove("is-hidden");
-  window.scrollTo(0, 0);
+  settingsToggleEl?.setAttribute("aria-expanded", "true");
+  document.body.classList.add("is-settings-open");
+}
+
+function closeSettingsModal() {
+  if (!settingsViewEl) {
+    return;
+  }
+  settingsViewEl.classList.add("is-hidden");
+  settingsToggleEl?.setAttribute("aria-expanded", "false");
+  document.body.classList.remove("is-settings-open");
+}
+
+function isSettingsModalOpen() {
+  return Boolean(settingsViewEl && !settingsViewEl.classList.contains("is-hidden"));
 }
 
 function bindCatalogButtons(scope) {
