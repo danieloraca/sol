@@ -730,6 +730,31 @@ function renderPlayer(item) {
   }
 
   const activeStream = selectedStreams[selectedStreamIndex];
+  const quickSources = selectedStreams
+    .map(
+      (stream, index) => {
+        const details = streamDetailLines(stream);
+        const title = streamDisplayTitle(stream);
+        const detailLine = details[0] || stream.playback_note || "";
+        return `
+          <button
+            class="source-chooser-item ${index === selectedStreamIndex ? "is-active" : ""}"
+            data-quick-stream-index="${index}"
+            type="button"
+          >
+            <span class="source-chooser-title-row">
+              <span class="source-chooser-quality">${escapeHtml(stream.quality || "Unknown quality")}</span>
+              <span class="source-chooser-kind">${playbackKindLabel(stream)}</span>
+            </span>
+            <span class="source-chooser-name">${escapeHtml(title)}</span>
+            <span class="source-chooser-meta">${escapeHtml(streamProviderName(stream))} • ${escapeHtml(stream.language || "Unknown language")}</span>
+            ${detailLine ? `<span class="source-chooser-detail">${escapeHtml(detailLine)}</span>` : ""}
+          </button>
+        `;
+      }
+    )
+    .join("");
+
   if (!playbackActivated) {
     playerStageEl.innerHTML = `
       <div class="player-screen">
@@ -748,6 +773,13 @@ function renderPlayer(item) {
           <p>Pick a stream below to start playback. The player loads right after you choose one.</p>
           <p class="player-subtitle">${item.genres.join(" / ")}</p>
         </div>
+
+        <aside class="source-chooser-overlay">
+          <p class="eyebrow">Source options</p>
+          <div class="source-chooser-list">
+            ${quickSources}
+          </div>
+        </aside>
       </div>
     `;
 
@@ -763,6 +795,12 @@ function renderPlayer(item) {
         <p class="meta">${escapeHtml(streamProviderName(activeStream))} • ${escapeHtml(activeStream.quality || "Unknown quality")} • ${playbackKindLabel(activeStream)}</p>
       </article>
     `;
+
+    playerStageEl.querySelectorAll("[data-quick-stream-index]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await switchToQuickSource(Number(button.dataset.quickStreamIndex), { autoPlay: true });
+      });
+    });
     return;
   }
 
@@ -814,6 +852,21 @@ function renderPlayer(item) {
       >
         <span aria-hidden="true">&#x26F6;</span>
       </button>
+      <button
+        class="control-button player-source-mini"
+        id="toggle-sources-mini"
+        data-player-action="sources"
+        aria-label="Choose source"
+        title="Choose source"
+      >
+        Sources
+      </button>
+      <aside id="player-source-overlay" class="source-chooser-overlay player-source-overlay is-hidden">
+        <p class="eyebrow">Switch source</p>
+        <div class="source-chooser-list">
+          ${quickSources}
+        </div>
+      </aside>
     </div>
   `;
 
@@ -850,8 +903,36 @@ function renderPlayer(item) {
   `;
 
   bindPlayerActions(item);
+  bindQuickSourceOverlayButtons();
   mountPlayer(item, activeStream);
   syncPlayerUi(item, activeStream);
+}
+
+function bindQuickSourceOverlayButtons() {
+  playerStageEl.querySelectorAll("[data-quick-stream-index]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const sourceOverlay = playerStageEl.querySelector("#player-source-overlay");
+      sourceOverlay?.classList.add("is-hidden");
+      await switchToQuickSource(Number(button.dataset.quickStreamIndex), {
+        autoPlay: true,
+      });
+    });
+  });
+}
+
+async function switchToQuickSource(nextIndex, options = {}) {
+  const { autoPlay = true } = options;
+  const resumeAt = getCurrentPlaybackSeconds();
+  selectedStreamIndex = nextIndex;
+  playbackActivated = true;
+  pendingSeekSeconds = resumeAt;
+  setPlaybackState(false);
+  const selectedItem = await getItem(selectedItemId);
+  renderPlayer(selectedItem);
+  renderStreams(selectedItem.title);
+  if (autoPlay) {
+    setPlaybackState(true);
+  }
 }
 
 function renderHandoffPlayer(item, stream) {
@@ -932,6 +1013,10 @@ function handlePlayerAction(action, item) {
     seekPlayerTo(0);
   } else if (action === "fullscreen") {
     void toggleFullscreen();
+  } else if (action === "sources") {
+    const sourceOverlay = playerStageEl.querySelector("#player-source-overlay");
+    sourceOverlay?.classList.toggle("is-hidden");
+    return;
   } else if (action === "next-source" && selectedStreams.length > 0) {
     const resumeAt = getCurrentPlaybackSeconds();
     const shouldResume = isPlaying;
@@ -983,6 +1068,11 @@ function renderStreams(title) {
     return;
   }
 
+  if (!playbackActivated) {
+    streamsEl.classList.add("is-hidden");
+    return;
+  }
+
   const activeSource = selectedStreams[selectedStreamIndex];
   const lookupCandidates = (selectedLookup?.candidates ?? []).filter((candidate) => candidate?.magnet_url);
   const canSubmitCandidates = showAutomaticSourceActions();
@@ -995,6 +1085,7 @@ function renderStreams(title) {
     .filter(({ stream }) => selectedStreamProviderFilter === "all" || streamProviderName(stream) === selectedStreamProviderFilter);
 
   streamsEl.classList.remove("empty");
+  streamsEl.classList.remove("is-hidden");
   streamsEl.innerHTML = `
     <p class="eyebrow">Stream sources</p>
     <h3>${title}</h3>
