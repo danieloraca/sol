@@ -823,7 +823,6 @@ function renderPlayer(item) {
           class="player-video"
           preload="metadata"
           playsinline
-          controls
           controlslist="nodownload noplaybackrate noremoteplayback"
           disablepictureinpicture
           ${escapedPoster}
@@ -831,36 +830,53 @@ function renderPlayer(item) {
         ></video>
       </div>
       <div class="player-badges">
-        <span class="badge">${item.media_type}</span>
-        <span class="badge">${item.year}</span>
         <span class="badge">${activeStream.quality}</span>
         <span class="badge" id="player-status-badge">${isPlaying ? "Playing now" : "Paused"}</span>
       </div>
 
-      <div class="player-overlay">
-        <p class="eyebrow">Player</p>
+      <div class="player-overlay player-overlay-compact">
         <h2>${item.title}</h2>
-        <p>${item.description}</p>
-        <p class="player-subtitle" id="player-subtitle">${item.genres.join(" / ")} • Source: ${activeStream.name} • Language: ${activeStream.language}</p>
       </div>
-      <button
-        class="control-button player-fullscreen-mini"
-        id="toggle-fullscreen-mini"
-        data-player-action="fullscreen"
-        aria-label="${isPlayerFullscreen ? "Exit fullscreen" : "Enter fullscreen"}"
-        title="${isPlayerFullscreen ? "Exit fullscreen" : "Enter fullscreen"}"
-      >
-        <span aria-hidden="true">&#x26F6;</span>
-      </button>
-      <button
-        class="control-button player-source-mini"
-        id="toggle-sources-mini"
-        data-player-action="sources"
-        aria-label="Choose source"
-        title="Choose source"
-      >
-        Sources
-      </button>
+      <div class="player-custom-controls" id="player-custom-controls">
+        <button
+          class="control-button player-control-chip"
+          id="toggle-playback-mini"
+          data-player-action="toggle"
+          aria-label="${isPlaying ? "Pause" : "Play"}"
+          title="${isPlaying ? "Pause" : "Play"}"
+        >
+          ${isPlaying ? "Pause" : "Play"}
+        </button>
+        <input
+          id="player-seek"
+          class="player-seek"
+          type="range"
+          min="0"
+          max="1000"
+          step="1"
+          value="${Math.round(playbackPercent * 10)}"
+          aria-label="Seek"
+        />
+        <span id="player-time" class="player-time">${formatDuration(playbackCurrentSeconds)} / ${formatDuration(playbackDurationSeconds || estimateRuntimeSeconds(item))}</span>
+        <button
+          class="control-button player-control-chip"
+          id="toggle-sources-mini"
+          data-player-action="sources"
+          aria-label="Choose source"
+          title="Choose source"
+        >
+          Sources
+        </button>
+        <button
+          class="control-button player-fullscreen-mini"
+          id="toggle-fullscreen-mini"
+          data-player-action="fullscreen"
+          aria-label="${isPlayerFullscreen ? "Exit fullscreen" : "Enter fullscreen"}"
+          title="${isPlayerFullscreen ? "Exit fullscreen" : "Enter fullscreen"}"
+        >
+          <span aria-hidden="true">&#x26F6;</span>
+        </button>
+      </div>
       <aside id="player-source-overlay" class="source-chooser-overlay player-source-overlay is-hidden">
         <p class="eyebrow">Switch source</p>
         <div class="source-chooser-list">
@@ -904,6 +920,7 @@ function renderPlayer(item) {
 
   bindPlayerActions(item);
   bindQuickSourceOverlayButtons();
+  bindPlayerSeekControls();
   mountPlayer(item, activeStream);
   syncPlayerUi(item, activeStream);
 }
@@ -1000,6 +1017,29 @@ function bindPlayerActions(item) {
       handlePlayerAction(button.dataset.playerAction, item);
     });
   });
+}
+
+function bindPlayerSeekControls() {
+  const seekField = playerStageEl.querySelector("#player-seek");
+  if (!seekField) {
+    return;
+  }
+
+  const applySeekFromRange = () => {
+    const item = currentItem();
+    if (!item) {
+      return;
+    }
+    const duration = playbackDurationSeconds || estimateRuntimeSeconds(item);
+    if (!duration || duration <= 0) {
+      return;
+    }
+    const targetSeconds = (Number(seekField.value) / 1000) * duration;
+    seekPlayerTo(targetSeconds);
+  };
+
+  seekField.addEventListener("input", applySeekFromRange);
+  seekField.addEventListener("change", applySeekFromRange);
 }
 
 function handlePlayerAction(action, item) {
@@ -1980,12 +2020,14 @@ function syncPlayerUi(item, stream) {
   const videoScreen = playerStageEl.querySelector(".player-screen.is-video");
   const statusBadge = document.querySelector("#player-status-badge");
   const subtitle = document.querySelector("#player-subtitle");
-  const toggleButton = document.querySelector("#toggle-playback");
+  const toggleButtons = document.querySelectorAll("[data-player-action='toggle']");
   const fullscreenButtons = [
     ...playerDetailsEl.querySelectorAll("[data-player-action='fullscreen']"),
     ...playerStageEl.querySelectorAll("[data-player-action='fullscreen']"),
   ];
   const streamStatusMessage = document.querySelector("#stream-status-message");
+  const seekField = playerStageEl.querySelector("#player-seek");
+  const timeLabel = playerStageEl.querySelector("#player-time");
 
   if (videoScreen) {
     videoScreen.classList.toggle("is-playing", isPlaying && !isPlaybackStarting);
@@ -1999,9 +2041,12 @@ function syncPlayerUi(item, stream) {
     subtitle.textContent = `${item.genres.join(" / ")} • Source: ${stream.name} • Language: ${stream.language}`;
   }
 
-  if (toggleButton) {
-    toggleButton.textContent = isPlaybackStarting ? "Starting..." : isPlaying ? "Pause" : "Play";
-  }
+  toggleButtons.forEach((button) => {
+    const label = isPlaybackStarting ? "Starting..." : isPlaying ? "Pause" : "Play";
+    button.textContent = label;
+    button.setAttribute("aria-label", label);
+    button.setAttribute("title", label);
+  });
 
   fullscreenButtons.forEach((button) => {
     const isMiniButton = button.id === "toggle-fullscreen-mini";
@@ -2020,6 +2065,18 @@ function syncPlayerUi(item, stream) {
       (isPlaybackStarting ? `Trying to start playback from ${stream.name}...` : "") ||
       selectedLookup?.message ||
       `Ready to play from ${stream.name}.`;
+  }
+
+  if (seekField) {
+    seekField.value = String(Math.round(playbackPercent * 10));
+  }
+
+  if (timeLabel) {
+    const elapsedSeconds = Number.isFinite(playbackCurrentSeconds) ? playbackCurrentSeconds : 0;
+    const totalSeconds = Number.isFinite(playbackDurationSeconds) && playbackDurationSeconds > 0
+      ? playbackDurationSeconds
+      : estimateRuntimeSeconds(item);
+    timeLabel.textContent = `${formatDuration(elapsedSeconds)} / ${formatDuration(totalSeconds)}`;
   }
 }
 
