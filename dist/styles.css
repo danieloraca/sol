@@ -11,6 +11,16 @@
   --accent-strong: #f7b267;
   --danger: #ffc6a8;
   --shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+  --radius-surface-xl: 24px;
+  --radius-surface-lg: 20px;
+  --radius-surface-md: 16px;
+  --radius-surface-sm: 14px;
+  --surface-padding: 16px;
+  --gap-section: 16px;
+  --gap-surface: 12px;
+  --gap-grid: 14px;
+  --gap-control: 8px;
+  --gap-tight: 6px;
 }
 
 * {
@@ -554,8 +564,14 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 .poster-label {
   position: absolute;
   left: 14px;
-  bottom: 14px;
+  top: 14px;
   z-index: 1;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(5, 13, 22, 0.7);
+  backdrop-filter: blur(3px);
+  font-weight: 600;
 }
 
 .card h3,
@@ -1227,17 +1243,21 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
   width: min(1200px, 100% - 40px);
   margin: 0 auto;
   padding: 24px 0 34px;
-  gap: 18px;
+  gap: var(--gap-surface);
+}
+
+.main-view {
+  gap: var(--gap-section);
 }
 
 .topbar {
   display: grid;
   grid-template-columns: auto 1fr auto;
-  gap: 14px;
+  gap: var(--gap-grid);
   align-items: center;
-  padding: 14px;
+  padding: var(--surface-padding);
   border: 1px solid var(--line);
-  border-radius: 20px;
+  border-radius: var(--radius-surface-xl);
   background: rgba(8, 19, 31, 0.75);
   backdrop-filter: blur(16px);
 }
@@ -1261,7 +1281,7 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 .topbar-search {
   display: grid;
   grid-template-columns: minmax(320px, 1fr) auto;
-  gap: 8px;
+  gap: var(--gap-control);
   align-items: center;
 }
 
@@ -1274,8 +1294,12 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 }
 
 .top-feedback {
-  min-height: 1.1em;
-  margin: 0 4px;
+  min-height: 0;
+  margin: 0 2px;
+}
+
+.top-feedback:empty {
+  display: none;
 }
 
 .settings-panel {
@@ -1294,10 +1318,10 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
   max-height: min(86vh, 960px);
   overflow: auto;
   display: grid;
-  gap: 12px;
-  padding: 18px;
+  gap: var(--gap-surface);
+  padding: var(--surface-padding);
   border: 1px solid var(--line);
-  border-radius: 22px;
+  border-radius: var(--radius-surface-xl);
   background: rgba(8, 19, 31, 0.95);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
 }
@@ -1322,7 +1346,7 @@ body.is-settings-open {
 
 .player-shell {
   grid-template-columns: 1fr;
-  gap: 14px;
+  gap: var(--gap-grid);
 }
 
 .player-stage {
@@ -1331,29 +1355,30 @@ body.is-settings-open {
 }
 
 .player-sidebar {
-  gap: 12px;
+  gap: var(--gap-surface);
 }
 
 .player-details {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 12px;
+  gap: var(--gap-surface);
 }
 
 .streams {
-  padding: 16px;
+  padding: var(--surface-padding);
   border: 1px solid var(--line);
-  border-radius: 20px;
+  border-radius: var(--radius-surface-lg);
   background: rgba(9, 23, 38, 0.82);
 }
 
 .stream-option-list {
-  gap: 10px;
+  gap: var(--gap-surface);
 }
 
 .stream-option-card {
   padding: 14px;
-  gap: 10px;
+  gap: var(--gap-control);
+  border-radius: var(--radius-surface-md);
 }
 
 .stream-option-card h3 {
@@ -1391,7 +1416,7 @@ body.is-settings-open {
 .stream-advanced-body {
   margin-top: 8px;
   display: grid;
-  gap: 6px;
+  gap: var(--gap-tight);
 }
 
 .player-intro-card {
@@ -1402,6 +1427,37 @@ body.is-settings-open {
 
 .player-intro-card p {
   margin: 0;
+}
+
+/* Radius rhythm for main page surfaces */
+.hero {
+  padding: var(--surface-padding);
+  border-radius: var(--radius-surface-xl);
+}
+
+.hero-media {
+  border-radius: var(--radius-surface-lg);
+}
+
+.hero-copy {
+  padding: var(--surface-padding);
+  border-radius: var(--radius-surface-md);
+}
+
+.card,
+.player-stage,
+.player-details-card {
+  padding: var(--surface-padding);
+  border-radius: var(--radius-surface-lg);
+}
+
+.poster {
+  border-radius: var(--radius-surface-md);
+}
+
+.filter,
+.search input {
+  border-radius: var(--radius-surface-sm);
 }
 
 @media (max-width: 980px) {

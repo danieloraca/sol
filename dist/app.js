@@ -2259,17 +2259,17 @@ function formatDuration(totalSeconds) {
 }
 
 function renderCard(item) {
+  const mediaTypeLabel = formatMediaType(item.media_type);
+  const showMediaBadge = mediaTypeLabel !== "Movie";
   return `
     <article class="card">
       <button data-id="${item.id}">
         <div class="poster ${item.poster_url ? "" : "is-fallback"}">
           ${renderPosterImage(item, "poster-image")}
-          <span class="poster-label">${item.media_type}</span>
+          ${showMediaBadge ? `<span class="poster-label">${escapeHtml(mediaTypeLabel)}</span>` : ""}
         </div>
         <h3>${item.title}</h3>
         <p class="meta">${item.year} • ${item.genres.join(" / ")}</p>
-        <p>${item.description}</p>
-        <p class="meta">${item.id === selectedItemId ? "Open in player" : "Select for playback"}</p>
       </button>
     </article>
   `;
@@ -2294,6 +2294,14 @@ function renderArtworkImage(item, className) {
 
 function heroArtworkUrl(item) {
   return item?.backdrop_url || item?.poster_url || "";
+}
+
+function formatMediaType(mediaType) {
+  const normalized = String(mediaType ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return "Media";
+  }
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
 function playbackKindLabel(stream) {
