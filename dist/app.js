@@ -23,6 +23,9 @@ const installAddonButtonEl = document.querySelector("#install-addon");
 const addonFeedbackEl = document.querySelector("#addon-feedback");
 const addonsListEl = document.querySelector("#addons-list");
 const addonDetailsEl = document.querySelector("#addon-details");
+const settingsToggleEl = document.querySelector("#settings-toggle");
+const settingsViewEl = document.querySelector("#settings-view");
+const settingsBackEl = document.querySelector("#settings-back");
 const filterButtons = [...document.querySelectorAll(".filter")];
 const TORBOX_AUTO_REFRESH_INTERVAL_MS = 5000;
 const TORBOX_AUTO_REFRESH_MAX_ATTEMPTS = 24;
@@ -57,10 +60,12 @@ let selectedAddonSource = null;
 let autoPlayPending = false;
 let manualSourceToolsVisible = false;
 let autoPlayTrace = null;
+let playbackActivated = false;
 let lastExecutedSearch = "";
 let isSearchViewActive = false;
 let currentPage = "main";
 let playerReturnPage = "main";
+let settingsReturnPage = "main";
 let selectItemRequestToken = 0;
 let fullscreenListenerBound = false;
 let isPlayerFullscreen = false;
@@ -137,6 +142,33 @@ async function bootstrap() {
     } catch (error) {
       addonFeedbackEl.textContent = String(error);
     }
+  });
+
+  settingsToggleEl?.addEventListener("click", () => {
+    if (currentPage === "settings") {
+      if (settingsReturnPage === "player") {
+        showPlayerView({ returnTo: playerReturnPage });
+        return;
+      }
+      if (settingsReturnPage === "search") {
+        showSearchView();
+        return;
+      }
+      showMainView();
+      return;
+    }
+    showSettingsView({ returnTo: currentPage });
+  });
+  settingsBackEl?.addEventListener("click", () => {
+    if (settingsReturnPage === "player") {
+      showPlayerView({ returnTo: playerReturnPage });
+      return;
+    }
+    if (settingsReturnPage === "search") {
+      showSearchView();
+      return;
+    }
+    showMainView();
   });
 
   if (!fullscreenListenerBound) {
@@ -511,42 +543,65 @@ function bindSearchResultButtons() {
 }
 
 function showSearchView() {
-  if (!mainViewEl || !searchViewEl || !playerViewEl) {
+  if (!mainViewEl || !searchViewEl || !playerViewEl || !settingsViewEl) {
     return;
   }
   currentPage = "search";
   setPlayerFullscreen(false);
   isSearchViewActive = true;
+  settingsToggleEl?.setAttribute("aria-expanded", "false");
   mainViewEl.classList.add("is-hidden");
   playerViewEl.classList.add("is-hidden");
+  settingsViewEl.classList.add("is-hidden");
   searchViewEl.classList.remove("is-hidden");
   window.scrollTo(0, 0);
 }
 
 function showMainView() {
-  if (!mainViewEl || !searchViewEl || !playerViewEl) {
+  if (!mainViewEl || !searchViewEl || !playerViewEl || !settingsViewEl) {
     return;
   }
   currentPage = "main";
   setPlayerFullscreen(false);
   isSearchViewActive = false;
+  settingsToggleEl?.setAttribute("aria-expanded", "false");
   searchViewEl.classList.add("is-hidden");
   playerViewEl.classList.add("is-hidden");
+  settingsViewEl.classList.add("is-hidden");
   mainViewEl.classList.remove("is-hidden");
   window.scrollTo(0, 0);
 }
 
 function showPlayerView(options = {}) {
-  if (!mainViewEl || !searchViewEl || !playerViewEl) {
+  if (!mainViewEl || !searchViewEl || !playerViewEl || !settingsViewEl) {
     return;
   }
   const { returnTo = currentPage === "search" ? "search" : "main" } = options;
   playerReturnPage = returnTo;
   currentPage = "player";
   isSearchViewActive = false;
+  settingsToggleEl?.setAttribute("aria-expanded", "false");
   mainViewEl.classList.add("is-hidden");
   searchViewEl.classList.add("is-hidden");
+  settingsViewEl.classList.add("is-hidden");
   playerViewEl.classList.remove("is-hidden");
+  window.scrollTo(0, 0);
+}
+
+function showSettingsView(options = {}) {
+  if (!mainViewEl || !searchViewEl || !playerViewEl || !settingsViewEl) {
+    return;
+  }
+  const { returnTo = currentPage === "search" ? "search" : "main" } = options;
+  settingsReturnPage = returnTo === "settings" ? "main" : returnTo;
+  currentPage = "settings";
+  setPlayerFullscreen(false);
+  isSearchViewActive = false;
+  settingsToggleEl?.setAttribute("aria-expanded", "true");
+  mainViewEl.classList.add("is-hidden");
+  searchViewEl.classList.add("is-hidden");
+  playerViewEl.classList.add("is-hidden");
+  settingsViewEl.classList.remove("is-hidden");
   window.scrollTo(0, 0);
 }
 
@@ -596,6 +651,7 @@ async function selectItem(id, options = {}) {
     selectedStreams = selectedLookup.streams ?? [];
     selectedStreamIndex = 0;
     selectedStreamProviderFilter = "all";
+    playbackActivated = Boolean(autoPlay);
     playbackPercent = 0;
     playbackCurrentSeconds = 0;
     playbackDurationSeconds = estimateRuntimeSeconds(item);
@@ -609,6 +665,7 @@ async function selectItem(id, options = {}) {
         setPlaybackState(true);
       }
     } else {
+      playbackActivated = false;
       setPlaybackState(false);
       renderNoStreams(item, selectedLookup);
       if (autoPlay) {
@@ -675,6 +732,42 @@ function renderPlayer(item) {
   }
 
   const activeStream = selectedStreams[selectedStreamIndex];
+  if (!playbackActivated) {
+    playerStageEl.innerHTML = `
+      <div class="player-screen">
+        <div class="player-art ${heroArtworkUrl(item) ? "" : "is-fallback"}">
+          ${renderArtworkImage(item, "player-poster")}
+        </div>
+        <div class="player-badges">
+          <span class="badge">${item.media_type}</span>
+          <span class="badge">${item.year}</span>
+          <span class="badge">${escapeHtml(activeStream.quality || "Source ready")}</span>
+        </div>
+
+        <div class="player-overlay player-intro-card">
+          <p class="eyebrow">Ready to watch</p>
+          <h2>${item.title}</h2>
+          <p>Pick a stream below to start playback. The player loads right after you choose one.</p>
+          <p class="player-subtitle">${item.genres.join(" / ")}</p>
+        </div>
+      </div>
+    `;
+
+    playerDetailsEl.innerHTML = `
+      <article class="player-details-card">
+        <p class="eyebrow">Selected title</p>
+        <h3>${item.title}</h3>
+        <p class="meta">${item.year} • ${item.media_type} • ${item.genres.join(" / ")}</p>
+      </article>
+      <article class="player-details-card">
+        <p class="eyebrow">Current source</p>
+        <h3>${escapeHtml(streamDisplayTitle(activeStream))}</h3>
+        <p class="meta">${escapeHtml(streamProviderName(activeStream))} • ${escapeHtml(activeStream.quality || "Unknown quality")} • ${playbackKindLabel(activeStream)}</p>
+      </article>
+    `;
+    return;
+  }
+
   if (activeStream.playback_kind !== "embedded") {
     renderHandoffPlayer(item, activeStream);
     return;
@@ -845,6 +938,7 @@ function handlePlayerAction(action, item) {
     const resumeAt = getCurrentPlaybackSeconds();
     const shouldResume = isPlaying;
     selectedStreamIndex = nextStreamIndexForActiveFilter();
+    playbackActivated = true;
     pendingSeekSeconds = resumeAt;
     lastPlaybackError = "";
     setPlaybackState(false);
@@ -934,20 +1028,23 @@ function renderStreams(title) {
                   <span class="provider-badge ${playbackKindClass(stream)}">${playbackKindLabel(stream)}</span>
                 </div>
               </div>
-              <p class="stream-option-subtitle">${escapeHtml(streamSourceLine(stream))}</p>
-              <div class="stream-option-detail-list">
-                ${streamDetailLines(stream)
-                  .map((detail) => `<p class="stream-option-detail">${escapeHtml(detail)}</p>`)
-                  .join("")}
-              </div>
-              <p class="stream-option-note">${escapeHtml(stream.playback_note || "No extra source details yet.")}</p>
+              <p class="stream-option-subtitle">${escapeHtml(streamProviderName(stream))} • ${escapeHtml(stream.language || "unknown language")} • ${playbackKindLabel(stream)}</p>
               <div class="stream-option-actions">
                 <button class="stream-button ${index === selectedStreamIndex ? "is-active" : ""}" data-stream-index="${index}">
-                  ${streamSelectionLabel(stream, index === selectedStreamIndex)}
+                  ${streamSelectionLabel(stream, index === selectedStreamIndex, playbackActivated)}
                 </button>
                 <button class="ghost-button stream-link" data-open-stream-index="${index}">${openSourceLabel(stream)}</button>
               </div>
-              <p class="stream-option-provider">${escapeHtml(streamProviderName(stream))}</p>
+              <details class="stream-advanced">
+                <summary>More details</summary>
+                <div class="stream-advanced-body">
+                  <p class="stream-option-provider">${escapeHtml(streamProviderName(stream))}</p>
+                  <p class="stream-option-note">${escapeHtml(stream.playback_note || "No extra source details yet.")}</p>
+                  ${streamDetailLines(stream)
+                    .map((detail) => `<p class="stream-option-detail">${escapeHtml(detail)}</p>`)
+                    .join("")}
+                </div>
+              </details>
             </article>
           `,
         )
@@ -996,7 +1093,7 @@ function renderStreams(title) {
       Showing ${visibleStreams.length} option${visibleStreams.length === 1 ? "" : "s"}
       from ${selectedStreamProviderFilter === "all" ? "all providers" : streamProviderName(activeSource)}
     </p>
-    <p class="stream-meta">Active source: ${escapeHtml(streamDisplayTitle(activeSource))} • ${escapeHtml(streamProviderName(activeSource))} • ${escapeHtml(activeSource.quality)} • ${playbackKindLabel(activeSource)}</p>
+    <p class="stream-meta">Active source: ${escapeHtml(streamDisplayTitle(activeSource))} • ${escapeHtml(streamProviderName(activeSource))} • ${escapeHtml(activeSource.quality || "Unknown quality")} • ${playbackKindLabel(activeSource)}</p>
   `;
 
   streamsEl.querySelectorAll("[data-stream-provider]").forEach((button) => {
@@ -1009,8 +1106,9 @@ function renderStreams(title) {
   streamsEl.querySelectorAll("[data-stream-index]").forEach((button) => {
     button.addEventListener("click", async () => {
       const resumeAt = getCurrentPlaybackSeconds();
-      const shouldResume = isPlaying;
+      const shouldResume = playbackActivated && isPlaying;
       selectedStreamIndex = Number(button.dataset.streamIndex);
+      playbackActivated = true;
       const item = await getItem(selectedItemId);
       pendingSeekSeconds = resumeAt;
       setPlaybackState(false);
@@ -1421,6 +1519,11 @@ function startTorboxAutoRefresh(itemId, options = {}) {
       };
       pushAutoPlayTrace(itemId, "TorBox returned a playable stream.", "success");
       if (autoPlay) {
+        playbackActivated = true;
+        const refreshedItem = itemCache.get(itemId);
+        if (refreshedItem) {
+          renderPlayer(refreshedItem);
+        }
         setPlaybackState(true);
       }
       return;
@@ -1477,6 +1580,8 @@ async function attemptAutoPlay(item, options = {}) {
   if (!force && selectedStreams.length > 0) {
     resetAutoPlayTrace(item.id);
     pushAutoPlayTrace(item.id, "Using an existing playable stream.", "success");
+    playbackActivated = true;
+    renderPlayer(item);
     setPlaybackState(true);
     return;
   }
@@ -1555,6 +1660,8 @@ async function attemptAutoPlay(item, options = {}) {
     await selectItem(item.id);
     if (selectedStreams.length > 0) {
       pushAutoPlayTrace(item.id, "A playable stream is ready and playback is starting.", "success");
+      playbackActivated = true;
+      renderPlayer(itemCache.get(item.id) ?? item);
       setPlaybackState(true);
       return;
     }
@@ -2221,16 +2328,20 @@ function openSourceLabel(stream) {
   return stream?.playback_kind === "embedded" ? "Open source URL" : "Open externally";
 }
 
-function streamSelectionLabel(stream, isSelected) {
+function streamSelectionLabel(stream, isSelected, hasStartedPlayback = false) {
   if (stream?.playback_kind === "external") {
-    return isSelected ? "Selected external source" : "Select external source";
+    return isSelected ? "Selected external source" : "Use external source";
   }
 
   if (stream?.playback_kind === "blocked") {
-    return isSelected ? "Selected blocked source" : "Select blocked source";
+    return isSelected ? "Selected blocked source" : "Use blocked source";
   }
 
-  return isSelected ? "Selected source" : "Switch to source";
+  if (!hasStartedPlayback) {
+    return isSelected ? "Play selected source" : "Play this source";
+  }
+
+  return isSelected ? "Selected source" : "Switch source";
 }
 
 function addonSettingsHint(addon) {

@@ -7,60 +7,41 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="shell">
-      <aside class="sidebar">
-        <div class="brand">
-          <p class="eyebrow">Desktop preview</p>
-          <h1>Sol</h1>
-          <p class="tagline">
-            A Rust media app starter with a living catalog and playback
-            sources.<br />Thanks, Bogdan.
-          </p>
-        </div>
-
-        <nav class="filters">
-          <button class="filter is-active" data-filter="">All</button>
-          <button class="filter" data-filter="movie">Movies</button>
-          <button class="filter" data-filter="series">Series</button>
-          <button class="filter" data-filter="channel">Channels</button>
-        </nav>
-
-        <label class="search">
-          <span>Search catalog</span>
-          <div class="search-row">
-            <input
-              id="search"
-              type="search"
-              placeholder="Try atlas, ambient, sci-fi..."
-            />
-            <button id="search-button" class="ghost-button search-button" type="button">Search</button>
-          </div>
-          <p id="search-feedback" class="meta"></p>
-        </label>
-
-        <section class="addon-manager">
-          <div class="section-heading">
-            <p class="eyebrow">Addons</p>
-            <h2>Install URLs</h2>
-          </div>
-          <label class="search">
-            <span>Manifest URL</span>
-            <input
-              id="addon-url"
-              type="url"
-              placeholder="https://example.com/manifest.json"
-            />
-          </label>
-          <div class="control-buttons">
-            <button class="primary-button" id="install-addon">Install addon</button>
-          </div>
-          <p id="addon-feedback" class="meta"></p>
-          <div id="addons-list" class="addon-list"></div>
-          <div id="addon-details" class="addon-details"></div>
-        </section>
-      </aside>
-
+    <div class="shell shell-main">
       <main class="content">
+        <header class="topbar">
+          <div class="topbar-brand">
+            <p class="eyebrow">Desktop preview</p>
+            <h1>Sol</h1>
+          </div>
+
+          <nav class="filters topbar-filters" aria-label="Catalog filters">
+            <button class="filter is-active" data-filter="">All</button>
+            <button class="filter" data-filter="movie">Movies</button>
+            <button class="filter" data-filter="series">Series</button>
+            <button class="filter" data-filter="channel">Channels</button>
+          </nav>
+
+          <div class="topbar-search">
+            <label class="search">
+              <span class="sr-only">Search catalog</span>
+              <div class="search-row">
+                <input
+                  id="search"
+                  type="search"
+                  placeholder="Search titles"
+                />
+                <button id="search-button" class="ghost-button search-button" type="button">Search</button>
+              </div>
+            </label>
+            <button id="settings-toggle" class="ghost-button" type="button" aria-expanded="false" aria-controls="settings-view">
+              Settings
+            </button>
+          </div>
+        </header>
+
+        <p id="search-feedback" class="meta top-feedback"></p>
+
         <div id="main-view" class="main-view">
           <section class="hero" id="hero"></section>
 
@@ -105,8 +86,8 @@
           <div class="section-heading player-view-heading">
             <button id="player-back" class="ghost-button" type="button">Back</button>
             <div>
-              <p class="eyebrow">Playback</p>
-              <h2>Player controls</h2>
+              <p class="eyebrow">Movie</p>
+              <h2>Choose source then play</h2>
             </div>
           </div>
 
@@ -120,6 +101,35 @@
               </div>
             </aside>
           </section>
+        </section>
+
+        <section id="settings-view" class="settings-panel is-hidden" aria-live="polite">
+          <div class="section-heading settings-view-heading">
+            <button id="settings-back" class="ghost-button" type="button">Back</button>
+            <div>
+              <p class="eyebrow">Settings</p>
+              <h2>Addons and Sources</h2>
+            </div>
+          </div>
+
+          <div class="section-heading">
+            <p class="eyebrow">Addons</p>
+            <h2>Install URLs</h2>
+          </div>
+          <label class="search">
+            <span>Manifest URL</span>
+            <input
+              id="addon-url"
+              type="url"
+              placeholder="https://example.com/manifest.json"
+            />
+          </label>
+          <div class="control-buttons">
+            <button class="primary-button" id="install-addon">Install addon</button>
+          </div>
+          <p id="addon-feedback" class="meta"></p>
+          <div id="addons-list" class="addon-list"></div>
+          <div id="addon-details" class="addon-details"></div>
         </section>
       </main>
     </div>
