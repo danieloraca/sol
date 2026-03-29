@@ -130,7 +130,7 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 .hero-copy h2,
 .card h3,
 .stream-card h3 {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
 }
 
 .brand h1,
@@ -1376,7 +1376,7 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 
 .topbar-brand h1 {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
 }
 
 .topbar-brand .eyebrow {
