@@ -840,12 +840,28 @@ function renderPlayer(item) {
       <div class="player-custom-controls" id="player-custom-controls">
         <button
           class="control-button player-control-chip"
+          data-player-action="rewind"
+          aria-label="Back 10 seconds"
+          title="Back 10 seconds"
+        >
+          -10
+        </button>
+        <button
+          class="control-button player-control-chip"
           id="toggle-playback-mini"
           data-player-action="toggle"
           aria-label="${isPlaying ? "Pause" : "Play"}"
           title="${isPlaying ? "Pause" : "Play"}"
         >
-          ${isPlaying ? "Pause" : "Play"}
+          ${isPlaying ? "❚❚" : "▶"}
+        </button>
+        <button
+          class="control-button player-control-chip"
+          data-player-action="forward"
+          aria-label="Forward 30 seconds"
+          title="Forward 30 seconds"
+        >
+          +30
         </button>
         <input
           id="player-seek"
@@ -886,37 +902,7 @@ function renderPlayer(item) {
     </div>
   `;
 
-  playerDetailsEl.innerHTML = `
-    <article class="player-details-card">
-      <p class="eyebrow">Now selected</p>
-      <h3>${item.title}</h3>
-      <p class="meta">${item.year} • ${item.media_type} • ${item.genres.join(" / ")}</p>
-    </article>
-
-    <article class="player-details-card">
-      <p class="eyebrow">Playback controls</p>
-      <div class="control-row">
-        <button class="control-button" data-player-action="rewind">-10s</button>
-        <button class="control-button" data-player-action="toggle" id="toggle-playback">${isPlaying ? "Pause" : "Play"}</button>
-        <button class="control-button" data-player-action="forward">+30s</button>
-        <button class="control-button" data-player-action="fullscreen" id="toggle-fullscreen">${isPlayerFullscreen ? "Exit full screen" : "Full screen"}</button>
-      </div>
-    </article>
-
-    <article class="player-details-card">
-      <p class="eyebrow">Stream status</p>
-      <p id="stream-status-message">${selectedLookup?.message ?? `Ready to play from ${activeStream.name}.`}</p>
-    </article>
-
-    <article class="player-details-card">
-      <p class="eyebrow">Quick actions</p>
-      <div class="control-buttons">
-        <button class="ghost-button" data-player-action="restart">Restart</button>
-        <button class="ghost-button" data-player-action="next-source">Next source</button>
-      </div>
-      <p class="meta">Next source cycles within: ${escapeHtml(nextSourceScopeLabel())}</p>
-    </article>
-  `;
+  playerDetailsEl.innerHTML = "";
 
   bindPlayerActions(item);
   bindQuickSourceOverlayButtons();
@@ -1164,16 +1150,8 @@ function renderStreams(title) {
                 </button>
                 <button class="ghost-button stream-link" data-open-stream-index="${index}">${openSourceLabel(stream)}</button>
               </div>
-              <details class="stream-advanced">
-                <summary>More details</summary>
-                <div class="stream-advanced-body">
-                  <p class="stream-option-provider">${escapeHtml(streamProviderName(stream))}</p>
-                  <p class="stream-option-note">${escapeHtml(stream.playback_note || "No extra source details yet.")}</p>
-                  ${streamDetailLines(stream)
-                    .map((detail) => `<p class="stream-option-detail">${escapeHtml(detail)}</p>`)
-                    .join("")}
-                </div>
-              </details>
+              <p class="stream-option-provider">${escapeHtml(streamProviderName(stream))}</p>
+              <p class="stream-option-note">${escapeHtml(stream.playback_note || "No extra source details yet.")}</p>
             </article>
           `,
         )
@@ -2043,7 +2021,7 @@ function syncPlayerUi(item, stream) {
 
   toggleButtons.forEach((button) => {
     const label = isPlaybackStarting ? "Starting..." : isPlaying ? "Pause" : "Play";
-    button.textContent = label;
+    button.textContent = isPlaybackStarting ? "…" : isPlaying ? "❚❚" : "▶";
     button.setAttribute("aria-label", label);
     button.setAttribute("title", label);
   });

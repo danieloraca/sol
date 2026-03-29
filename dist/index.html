@@ -72,11 +72,8 @@
 
         <section id="search-view" class="search-view is-hidden" aria-live="polite">
           <div class="section-heading search-view-heading">
-            <button id="search-back" class="ghost-button" type="button">Back</button>
-            <div>
-              <p class="eyebrow">Search</p>
-              <h2 id="search-results-title">Results</h2>
-            </div>
+            <h2 id="search-results-title">Results</h2>
+            <button id="search-back" class="search-back-link" type="button">Back</button>
           </div>
           <p id="search-results-summary" class="meta"></p>
           <div id="search-results" class="catalog-grid"></div>
@@ -106,31 +103,32 @@
         <section id="settings-view" class="settings-panel is-hidden" aria-live="polite" aria-modal="true" role="dialog">
           <div class="settings-modal-dialog">
             <div class="section-heading settings-view-heading">
-              <button id="settings-back" class="ghost-button" type="button">Done</button>
               <div>
                 <p class="eyebrow">Settings</p>
                 <h2>Addons and Sources</h2>
               </div>
+              <button id="settings-back" class="ghost-button" type="button">Done</button>
             </div>
-
-            <div class="section-heading">
-              <p class="eyebrow">Addons</p>
-              <h2>Install URLs</h2>
+            <div class="settings-modal-body">
+              <div class="section-heading">
+                <p class="eyebrow">Addons</p>
+                <h2>Install URLs</h2>
+              </div>
+              <label class="search">
+                <span>Manifest URL</span>
+                <input
+                  id="addon-url"
+                  type="url"
+                  placeholder="https://example.com/manifest.json"
+                />
+              </label>
+              <div class="control-buttons">
+                <button class="primary-button" id="install-addon">Install addon</button>
+              </div>
+              <p id="addon-feedback" class="meta"></p>
+              <div id="addons-list" class="addon-list"></div>
+              <div id="addon-details" class="addon-details"></div>
             </div>
-            <label class="search">
-              <span>Manifest URL</span>
-              <input
-                id="addon-url"
-                type="url"
-                placeholder="https://example.com/manifest.json"
-              />
-            </label>
-            <div class="control-buttons">
-              <button class="primary-button" id="install-addon">Install addon</button>
-            </div>
-            <p id="addon-feedback" class="meta"></p>
-            <div id="addons-list" class="addon-list"></div>
-            <div id="addon-details" class="addon-details"></div>
           </div>
         </section>
       </main>
