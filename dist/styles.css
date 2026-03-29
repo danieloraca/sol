@@ -402,13 +402,11 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
   min-height: 280px;
   display: grid;
   align-items: end;
-  padding: 20px;
-  border: 1px solid var(--line);
-  border-radius: 28px;
-  background:
-    linear-gradient(120deg, rgba(4, 10, 16, 0.16), rgba(4, 10, 16, 0.68)),
-    linear-gradient(135deg, rgba(125, 249, 208, 0.22), rgba(247, 178, 103, 0.18));
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.3);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .hero-media {
@@ -457,8 +455,8 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
   max-width: min(52ch, 56%);
   padding: 18px 18px 16px;
   border-radius: 18px;
-  background: linear-gradient(120deg, rgba(3, 9, 16, 0.46), rgba(3, 9, 16, 0.2));
-  backdrop-filter: blur(2px);
+  background: transparent;
+  backdrop-filter: none;
   text-shadow: 0 2px 20px rgba(0, 0, 0, 0.5);
 }
 
@@ -1638,8 +1636,8 @@ body.is-settings-open {
 
 /* Radius rhythm for main page surfaces */
 .hero {
-  padding: var(--surface-padding);
-  border-radius: var(--radius-surface-xl);
+  padding: 0;
+  border-radius: 0;
 }
 
 .hero-media {
