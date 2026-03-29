@@ -2407,20 +2407,12 @@ function formatDuration(totalSeconds) {
 }
 
 function renderCard(item) {
-  const mediaTypeLabel = formatMediaType(item.media_type);
-  const showMediaBadge = mediaTypeLabel !== "Movie";
-  const genres = Array.isArray(item.genres) ? item.genres.slice(0, 2) : [];
-  const genreLine = genres.join(" / ");
   return `
     <article class="card">
-      <button data-id="${item.id}">
+      <button data-id="${item.id}" aria-label="${escapeHtml(item.title)}">
         <div class="poster ${item.poster_url ? "" : "is-fallback"}">
           ${renderPosterImage(item, "poster-image")}
-          ${showMediaBadge ? `<span class="poster-label">${escapeHtml(mediaTypeLabel)}</span>` : ""}
         </div>
-        <h3>${item.title}</h3>
-        <p class="meta">${item.year}${genreLine ? ` • ${escapeHtml(genreLine)}` : ""}</p>
-        <p class="card-description">${escapeHtml(item.description || "")}</p>
       </button>
     </article>
   `;
@@ -2445,14 +2437,6 @@ function renderArtworkImage(item, className) {
 
 function heroArtworkUrl(item) {
   return item?.backdrop_url || item?.poster_url || "";
-}
-
-function formatMediaType(mediaType) {
-  const normalized = String(mediaType ?? "").trim().toLowerCase();
-  if (!normalized) {
-    return "Media";
-  }
-  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
 function playbackKindLabel(stream) {

@@ -495,11 +495,17 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 }
 
 .rail {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  justify-content: start;
+  margin: 0;
+  padding: 0;
 }
 
 .catalog-grid {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  justify-content: start;
+  margin: 0;
+  padding: 0;
 }
 
 .card,
@@ -513,9 +519,11 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 }
 
 .card {
-  padding: 18px;
+  padding: 0 !important;
+  border: 0;
+  border-radius: 0;
   box-shadow: none;
-  background: #10263c;
+  background: transparent;
 }
 
 .catalog-empty {
@@ -531,17 +539,14 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
   color: inherit;
   text-align: left;
   cursor: pointer;
-  display: grid;
-  gap: 10px;
-  min-height: 100%;
-  align-content: start;
+  display: block;
 }
 
 .poster {
   height: auto;
   aspect-ratio: 2 / 3;
-  min-height: 240px;
-  margin-bottom: 14px;
+  min-height: 380px;
+  margin-bottom: 0;
   border-radius: 18px;
   overflow: hidden;
   background:
@@ -564,56 +569,11 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
   background: linear-gradient(180deg, rgba(7, 17, 31, 0.04), rgba(7, 17, 31, 0.28));
 }
 
-.poster-label {
-  position: absolute;
-  left: 14px;
-  top: 14px;
-  z-index: 1;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(5, 13, 22, 0.7);
-  backdrop-filter: blur(3px);
-  font-weight: 600;
-}
-
 .card h3,
 .stream-card h3,
 .player-details-card h3,
 .player-overlay h2 {
   margin: 0 0 8px;
-}
-
-.card h3 {
-  margin: 0;
-  font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
-  font-weight: 400;
-  letter-spacing: -0.01em;
-  font-size: clamp(1.05rem, 1.55vw, 1.55rem);
-  line-height: 1.04;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  min-height: calc(1.04em * 2);
-}
-
-.card .meta {
-  margin: 0;
-  font-size: 0.86rem;
-}
-
-.card-description {
-  margin-top: 2px;
-  margin-bottom: 0;
-  color: #c9d7ee;
-  line-height: 1.28;
-  font-size: 0.82rem;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  opacity: 0.92;
 }
 
 .meta,
@@ -1700,6 +1660,11 @@ body.is-settings-open {
     top: 10px;
   }
 
+  .rail,
+  .catalog-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .player-custom-controls {
     width: calc(100% - 28px);
     bottom: 14px;
@@ -1713,6 +1678,11 @@ body.is-settings-open {
 
 @media (max-width: 640px) {
   .topbar-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rail,
+  .catalog-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
