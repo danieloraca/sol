@@ -2502,12 +2502,14 @@ function renderCard(item, options = {}) {
           ${
             shouldShowProgress
               ? `
+                <div class="card-progress-label">
+                  <p class="card-progress-meta">${Math.round(progressPercent)}% watched${remaining ? ` • ${escapeHtml(remaining)} left` : ""}</p>
+                  ${sourceLabel ? `<p class="card-progress-source">${escapeHtml(sourceLabel)}</p>` : ""}
+                </div>
                 <div class="card-progress-overlay">
                   <div class="card-progress-bar">
                     <div class="card-progress-value" style="width: ${progressPercent.toFixed(2)}%"></div>
                   </div>
-                  <p class="card-progress-meta">${Math.round(progressPercent)}% watched${remaining ? ` • ${escapeHtml(remaining)} left` : ""}</p>
-                  ${sourceLabel ? `<p class="card-progress-source">${escapeHtml(sourceLabel)}</p>` : ""}
                 </div>
               `
               : ""
