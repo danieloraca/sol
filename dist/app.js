@@ -542,6 +542,7 @@ function showSearchView() {
   if (!mainViewEl || !searchViewEl || !playerViewEl || !settingsViewEl) {
     return;
   }
+  stopPlaybackForNavigation();
   closeSettingsModal();
   currentPage = "search";
   setPlayerFullscreen(false);
@@ -556,6 +557,7 @@ function showMainView() {
   if (!mainViewEl || !searchViewEl || !playerViewEl || !settingsViewEl) {
     return;
   }
+  stopPlaybackForNavigation();
   closeSettingsModal();
   currentPage = "main";
   setPlayerFullscreen(false);
@@ -581,6 +583,29 @@ function showPlayerView(options = {}) {
   window.scrollTo(0, 0);
 }
 
+function stopPlaybackForNavigation() {
+  const item = currentItem();
+  const stream = activeStreamForSelection();
+  const video = document.querySelector("#player-video");
+
+  if (item && stream) {
+    const duration = playbackDurationSeconds || estimateRuntimeSeconds(item);
+    const position = video && Number.isFinite(video.currentTime)
+      ? video.currentTime
+      : playbackCurrentSeconds;
+    if (position > 0) {
+      recordWatchProgress(item, position, duration, stream);
+    }
+  }
+
+  if (video) {
+    video.pause();
+  }
+  clearPlaybackStartWatchdog();
+  isPlaying = false;
+  isPlaybackStarting = false;
+}
+
 function toggleSettingsModal() {
   if (isSettingsModalOpen()) {
     closeSettingsModal();
@@ -593,6 +618,7 @@ function openSettingsModal() {
   if (!settingsViewEl) {
     return;
   }
+  stopPlaybackForNavigation();
   settingsViewEl.classList.remove("is-hidden");
   settingsToggleEl?.setAttribute("aria-expanded", "true");
   document.body.classList.add("is-settings-open");
