@@ -19,10 +19,13 @@ cargo run
 
 That launches the Tauri shell and shows:
 
-- a featured hero card
-- a trending rail
-- a filterable catalog
-- stream source inspection for each seeded title
+- a top bar with media filters, search, and settings
+- a featured hero section
+- continue watching and trending rails
+- a poster-first catalog grid
+- search results view with dedicated back navigation
+- a dedicated playback screen with custom controls and source switching
+- a settings modal for addon install/manage actions
 
 ## Run the API server
 
@@ -100,6 +103,5 @@ You can inspect the current addon registry through:
 
 1. Add real metadata providers and a local library/watch history store with SQLite.
 2. Introduce a shared playback/session layer that both desktop and future Android TV clients can consume.
-3. Replace the static frontend with a richer Tauri UI or a bundled frontend framework once the machine has a working Node toolchain.
+3. Continue refining the desktop UX and interaction model, then carry that system into an Android TV-focused client.
 4. Add authentication, watchlists, progress tracking, and provider integrations.
-# sol
