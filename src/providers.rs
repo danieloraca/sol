@@ -1446,17 +1446,63 @@ fn seed_catalog() -> Vec<MediaItem> {
             poster_url: "https://images.example.com/night-shift-atlas.jpg".into(),
             backdrop_url: "https://images.example.com/night-shift-atlas-hero.jpg".into(),
             year: 2025,
-            streams: vec![StreamSource {
-                provider: "Demo".into(),
-                name: "Season 1".into(),
-                full_title: "Season 1".into(),
-                details: vec!["Bundled demo source".into()],
-                quality: "1080p".into(),
-                language: "en".into(),
-                url: "https://stream.example.com/night-shift-atlas/s1".into(),
-                playback_kind: "embedded".into(),
-                playback_note: "Playable in the in-app player.".into(),
-            }],
+            streams: vec![
+                StreamSource {
+                    provider: "Demo".into(),
+                    name: "S01E01 • Cartographer's Oath".into(),
+                    full_title: "Night Shift Atlas S01E01 • Cartographer's Oath".into(),
+                    details: vec!["Bundled demo source".into()],
+                    quality: "1080p".into(),
+                    language: "en".into(),
+                    url: "https://stream.example.com/night-shift-atlas/s01e01".into(),
+                    playback_kind: "embedded".into(),
+                    playback_note: "Playable in the in-app player.".into(),
+                },
+                StreamSource {
+                    provider: "Demo".into(),
+                    name: "S01E02 • Dead Signal".into(),
+                    full_title: "Night Shift Atlas S01E02 • Dead Signal".into(),
+                    details: vec!["Bundled demo source".into()],
+                    quality: "1080p".into(),
+                    language: "en".into(),
+                    url: "https://stream.example.com/night-shift-atlas/s01e02".into(),
+                    playback_kind: "embedded".into(),
+                    playback_note: "Playable in the in-app player.".into(),
+                },
+                StreamSource {
+                    provider: "Demo".into(),
+                    name: "S01E03 • Parallax Drift".into(),
+                    full_title: "Night Shift Atlas S01E03 • Parallax Drift".into(),
+                    details: vec!["Bundled demo source".into()],
+                    quality: "1080p".into(),
+                    language: "en".into(),
+                    url: "https://stream.example.com/night-shift-atlas/s01e03".into(),
+                    playback_kind: "embedded".into(),
+                    playback_note: "Playable in the in-app player.".into(),
+                },
+                StreamSource {
+                    provider: "Demo".into(),
+                    name: "S02E01 • Meridian Fault".into(),
+                    full_title: "Night Shift Atlas S02E01 • Meridian Fault".into(),
+                    details: vec!["Bundled demo source".into()],
+                    quality: "1080p".into(),
+                    language: "en".into(),
+                    url: "https://stream.example.com/night-shift-atlas/s02e01".into(),
+                    playback_kind: "embedded".into(),
+                    playback_note: "Playable in the in-app player.".into(),
+                },
+                StreamSource {
+                    provider: "Demo".into(),
+                    name: "S02E02 • Blacklight Archive".into(),
+                    full_title: "Night Shift Atlas S02E02 • Blacklight Archive".into(),
+                    details: vec!["Bundled demo source".into()],
+                    quality: "1080p".into(),
+                    language: "en".into(),
+                    url: "https://stream.example.com/night-shift-atlas/s02e02".into(),
+                    playback_kind: "embedded".into(),
+                    playback_note: "Playable in the in-app player.".into(),
+                },
+            ],
         },
         MediaItem {
             id: "channel:lofi-cosmos".into(),
@@ -1624,5 +1670,27 @@ mod tests {
         let result = provider.submit_magnet(&item, "magnet:?xt=urn:btih:demo", true);
 
         assert_eq!(result.status, "unavailable");
+    }
+
+    #[test]
+    fn seeded_series_contains_multiple_seasons_and_episodes() {
+        let provider = SeededLibraryProvider::demo();
+        let series = provider
+            .item("series:night-shift")
+            .expect("seeded series item should exist");
+
+        assert!(
+            series
+                .streams
+                .iter()
+                .any(|stream| stream.name.contains("S01E01"))
+        );
+        assert!(
+            series
+                .streams
+                .iter()
+                .any(|stream| stream.name.contains("S02E01"))
+        );
+        assert!(series.streams.len() >= 5);
     }
 }

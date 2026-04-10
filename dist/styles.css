@@ -653,6 +653,10 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 }
 
 @media (max-width: 640px) {
+  .series-episode-controls {
+    grid-template-columns: 1fr;
+  }
+
   .card-progress-overlay {
     left: 10px;
     right: 10px;
@@ -1304,6 +1308,39 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.series-episode-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.series-picker {
+  display: grid;
+  gap: 6px;
+}
+
+.series-picker > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.series-picker select {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(8, 22, 37, 0.84);
+  color: var(--text);
+  font: inherit;
+}
+
+.series-picker select:focus {
+  outline: none;
+  border-color: rgba(125, 249, 208, 0.5);
 }
 
 .stream-provider-tab {

@@ -80,6 +80,8 @@ let fullscreenPointerTicking = false;
 let lastFullscreenControlsRefreshMs = 0;
 let watchProgressById = {};
 let watchProgressLastSavedAt = new Map();
+let selectedSeriesSeason = null;
+let selectedSeriesEpisode = null;
 
 async function bootstrap() {
   if (!invoke) {
@@ -698,7 +700,15 @@ async function selectItem(id, options = {}) {
     if (requestToken !== selectItemRequestToken) {
       return;
     }
-    selectedStreams = selectedLookup.streams ?? [];
+    const lookupStreams = selectedLookup.streams ?? [];
+    selectedStreams = filterDisplayStreams(lookupStreams);
+    if (lookupStreams.length > 0 && selectedStreams.length === 0) {
+      selectedLookup = {
+        ...selectedLookup,
+        status: "filtered_external",
+        message: "Only external/download-oriented sources were found, and they are hidden.",
+      };
+    }
     selectedStreamIndex = 0;
     if (resumeEntry?.source_fingerprint || resumeEntry?.source_url) {
       const matchedSourceIndex = matchResumeSourceIndex(selectedStreams, resumeEntry);
@@ -707,6 +717,8 @@ async function selectItem(id, options = {}) {
       }
     }
     selectedStreamProviderFilter = "all";
+    selectedSeriesSeason = null;
+    selectedSeriesEpisode = null;
     playbackActivated = Boolean(autoPlay);
     playbackPercent = 0;
     playbackCurrentSeconds = resumeEntry?.position_seconds
@@ -719,7 +731,7 @@ async function selectItem(id, options = {}) {
     if (selectedStreams.length > 0) {
       stopTorboxAutoRefresh();
       renderPlayer(item);
-      renderStreams(item.title);
+      renderStreams(item);
       if (autoPlay) {
         setPlaybackState(true);
       }
@@ -1029,7 +1041,8 @@ async function switchToQuickSource(nextIndex, options = {}) {
   setPlaybackState(false);
   const selectedItem = await getItem(selectedItemId);
   renderPlayer(selectedItem);
-  renderStreams(selectedItem.title);
+  syncSeriesSelectionFromStream(selectedStreams[selectedStreamIndex]);
+  renderStreams(selectedItem);
   if (autoPlay) {
     setPlaybackState(true);
   }
@@ -1149,7 +1162,8 @@ function handlePlayerAction(action, item) {
     lastPlaybackError = "";
     setPlaybackState(false);
     renderPlayer(item);
-    renderStreams(item.title);
+    syncSeriesSelectionFromStream(selectedStreams[selectedStreamIndex]);
+    renderStreams(item);
 
     if (shouldResume) {
       setPlaybackState(true);
@@ -1185,15 +1199,40 @@ function nextStreamIndexForActiveFilter() {
   return providerIndexes[(currentPosition + 1) % providerIndexes.length];
 }
 
-function renderStreams(title) {
+function renderStreams(itemOrTitle) {
+  const item = typeof itemOrTitle === "string"
+    ? itemCache.get(selectedItemId) ?? null
+    : itemOrTitle;
+  const title = typeof itemOrTitle === "string"
+    ? itemOrTitle
+    : (itemOrTitle?.title || "Sources");
+
   if (selectedStreams.length === 0) {
     renderNoStreams(itemCache.get(selectedItemId), selectedLookup);
     return;
   }
 
-  if (!playbackActivated) {
+  const isSeries = item?.media_type === "series";
+  if (!playbackActivated && !isSeries) {
     streamsEl.classList.add("is-hidden");
     return;
+  }
+
+  const episodeModel = isSeries ? buildSeriesEpisodeModel(selectedStreams) : null;
+  if (episodeModel && episodeModel.seasons.length > 0) {
+    if (!episodeModel.episodesBySeason.has(selectedSeriesSeason)) {
+      selectedSeriesSeason = episodeModel.seasons[0];
+    }
+    const episodesInSeason = episodeModel.episodesBySeason.get(selectedSeriesSeason) || [];
+    if (!episodesInSeason.some((episode) => episode.episode === selectedSeriesEpisode)) {
+      selectedSeriesEpisode = episodesInSeason[0]?.episode ?? null;
+    }
+    const selectedEpisodeEntry = episodesInSeason.find(
+      (entry) => entry.episode === selectedSeriesEpisode,
+    );
+    if (selectedEpisodeEntry && selectedEpisodeEntry.index !== selectedStreamIndex) {
+      selectedStreamIndex = selectedEpisodeEntry.index;
+    }
   }
 
   const activeSource = selectedStreams[selectedStreamIndex];
@@ -1212,6 +1251,40 @@ function renderStreams(title) {
   streamsEl.innerHTML = `
     <p class="eyebrow">Stream sources</p>
     <h3>${title}</h3>
+    ${
+      episodeModel
+        ? `
+          <div class="series-episode-controls">
+            <label class="series-picker">
+              <span>Season</span>
+              <select data-series-season>
+                ${episodeModel.seasons
+                  .map(
+                    (season) => `
+                      <option value="${season}" ${season === selectedSeriesSeason ? "selected" : ""}>Season ${season}</option>
+                    `,
+                  )
+                  .join("")}
+              </select>
+            </label>
+            <label class="series-picker">
+              <span>Episode</span>
+              <select data-series-episode>
+                ${(episodeModel.episodesBySeason.get(selectedSeriesSeason) || [])
+                  .map(
+                    (entry) => `
+                      <option value="${entry.episode}" ${entry.episode === selectedSeriesEpisode ? "selected" : ""}>
+                        Episode ${entry.episode}${entry.label ? ` • ${escapeHtml(entry.label)}` : ""}
+                      </option>
+                    `,
+                  )
+                  .join("")}
+              </select>
+            </label>
+          </div>
+        `
+        : ""
+    }
     <div class="stream-provider-tabs">
       ${providerOptions
         .map(
@@ -1303,8 +1376,41 @@ function renderStreams(title) {
   streamsEl.querySelectorAll("[data-stream-provider]").forEach((button) => {
     button.addEventListener("click", () => {
       selectedStreamProviderFilter = button.dataset.streamProvider || "all";
-      renderStreams(title);
+      renderStreams(item ?? title);
     });
+  });
+
+  streamsEl.querySelector("[data-series-season]")?.addEventListener("change", async (event) => {
+    if (!episodeModel) {
+      return;
+    }
+    const nextSeason = Number(event.target.value);
+    const episodesInSeason = episodeModel.episodesBySeason.get(nextSeason) || [];
+    const nextEpisode = episodesInSeason[0]?.episode;
+    if (!nextEpisode) {
+      return;
+    }
+    selectedSeriesSeason = nextSeason;
+    selectedSeriesEpisode = nextEpisode;
+    const nextEntry = episodesInSeason.find((entry) => entry.episode === nextEpisode);
+    if (!nextEntry) {
+      return;
+    }
+    await switchToSeriesEpisode(item, nextEntry.index);
+  });
+
+  streamsEl.querySelector("[data-series-episode]")?.addEventListener("change", async (event) => {
+    if (!episodeModel) {
+      return;
+    }
+    const nextEpisode = Number(event.target.value);
+    const episodesInSeason = episodeModel.episodesBySeason.get(selectedSeriesSeason) || [];
+    const nextEntry = episodesInSeason.find((entry) => entry.episode === nextEpisode);
+    if (!nextEntry) {
+      return;
+    }
+    selectedSeriesEpisode = nextEpisode;
+    await switchToSeriesEpisode(item, nextEntry.index);
   });
 
   streamsEl.querySelectorAll("[data-stream-index]").forEach((button) => {
@@ -1312,12 +1418,13 @@ function renderStreams(title) {
       const resumeAt = getCurrentPlaybackSeconds();
       const shouldResume = playbackActivated && isPlaying;
       selectedStreamIndex = Number(button.dataset.streamIndex);
+      syncSeriesSelectionFromStream(selectedStreams[selectedStreamIndex]);
       playbackActivated = true;
       const item = await getItem(selectedItemId);
       pendingSeekSeconds = resumeAt;
       setPlaybackState(false);
       renderPlayer(item);
-      renderStreams(item.title);
+      renderStreams(item);
 
       if (shouldResume) {
         setPlaybackState(true);
@@ -1346,7 +1453,7 @@ function renderStreams(title) {
         status: "pending",
         message: `Sending "${candidate.name || "candidate"}" to TorBox...`,
       };
-      renderStreams(item.title);
+      renderStreams(item);
 
       try {
         const result = await invoke("submit_torbox_magnet", {
@@ -1368,10 +1475,120 @@ function renderStreams(title) {
           status: "error",
           message: String(error),
         };
-        renderStreams(item.title);
+        renderStreams(item);
       }
     });
   });
+}
+
+async function switchToSeriesEpisode(item, nextIndex) {
+  const resumeAt = getCurrentPlaybackSeconds();
+  const shouldResume = playbackActivated && isPlaying;
+  selectedStreamIndex = nextIndex;
+  syncSeriesSelectionFromStream(selectedStreams[selectedStreamIndex]);
+  playbackActivated = true;
+  pendingSeekSeconds = resumeAt;
+  setPlaybackState(false);
+  renderPlayer(item);
+  renderStreams(item);
+  if (shouldResume) {
+    setPlaybackState(true);
+  }
+}
+
+function syncSeriesSelectionFromStream(stream) {
+  const parsed = parseSeriesEpisodeFromStream(stream);
+  if (!parsed) {
+    return;
+  }
+  selectedSeriesSeason = parsed.season;
+  selectedSeriesEpisode = parsed.episode;
+}
+
+function buildSeriesEpisodeModel(streams) {
+  if (!Array.isArray(streams) || streams.length === 0) {
+    return null;
+  }
+
+  const episodesBySeason = new Map();
+  const fallbackEpisodeCursor = new Map();
+
+  streams.forEach((stream, index) => {
+    const parsed = parseSeriesEpisodeFromStream(stream);
+    let season = parsed?.season ?? 1;
+    let episode = parsed?.episode ?? ((fallbackEpisodeCursor.get(season) || 0) + 1);
+    if (!parsed) {
+      fallbackEpisodeCursor.set(season, episode);
+    }
+
+    if (!episodesBySeason.has(season)) {
+      episodesBySeason.set(season, []);
+    }
+    const list = episodesBySeason.get(season);
+    if (!list.some((entry) => entry.episode === episode)) {
+      list.push({
+        episode,
+        index,
+        label: parsed?.label || streamDisplayTitle(stream),
+      });
+    }
+  });
+
+  const seasons = [...episodesBySeason.keys()].sort((left, right) => left - right);
+  seasons.forEach((season) => {
+    episodesBySeason
+      .get(season)
+      .sort((left, right) => left.episode - right.episode);
+  });
+
+  return { seasons, episodesBySeason };
+}
+
+function parseSeriesEpisodeFromStream(stream) {
+  const lines = [
+    stream?.full_title,
+    stream?.name,
+    ...(Array.isArray(stream?.details) ? stream.details : []),
+  ]
+    .filter(Boolean)
+    .map((line) => String(line));
+  const text = lines.join(" ");
+
+  const compact = text.match(/\bS(\d{1,2})\s*E(\d{1,2})\b/i);
+  if (compact) {
+    return {
+      season: Number(compact[1]),
+      episode: Number(compact[2]),
+      label: streamDisplayTitle(stream),
+    };
+  }
+
+  const xStyle = text.match(/\b(\d{1,2})x(\d{1,2})\b/i);
+  if (xStyle) {
+    return {
+      season: Number(xStyle[1]),
+      episode: Number(xStyle[2]),
+      label: streamDisplayTitle(stream),
+    };
+  }
+
+  const verbose = text.match(/season\D*(\d{1,2}).*episode\D*(\d{1,2})/i);
+  if (verbose) {
+    return {
+      season: Number(verbose[1]),
+      episode: Number(verbose[2]),
+      label: streamDisplayTitle(stream),
+    };
+  }
+
+  return null;
+}
+
+function filterDisplayStreams(streams) {
+  if (!Array.isArray(streams)) {
+    return [];
+  }
+  return streams.filter((stream) => stream?.playback_kind !== "external");
 }
 
 function streamProviderName(stream) {
