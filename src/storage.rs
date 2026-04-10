@@ -17,12 +17,16 @@ pub struct WatchProgressStore {
 impl WatchProgressStore {
     pub fn new() -> Result<Self, String> {
         let db_path = resolve_db_path()?;
+        Self::open_at_path(&db_path)
+    }
+
+    fn open_at_path(db_path: &PathBuf) -> Result<Self, String> {
         if let Some(parent) = db_path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|error| format!("Could not create database directory: {error}"))?;
         }
 
-        let connection = Connection::open(&db_path)
+        let connection = Connection::open(db_path)
             .map_err(|error| format!("Could not open watch progress database: {error}"))?;
 
         connection
@@ -186,5 +190,89 @@ fn now_unix_ms() -> i64 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_millis() as i64,
         Err(_) => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        path::PathBuf,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
+
+    use super::WatchProgressStore;
+
+    #[test]
+    fn upsert_and_list_watch_progress_entries() {
+        let db_path = temp_db_path("list");
+        let store = WatchProgressStore::open_at_path(&db_path).expect("store should open");
+
+        store
+            .upsert("movie:first", 12.5, 220, 1760)
+            .expect("first upsert should succeed");
+        std::thread::sleep(Duration::from_millis(2));
+        store
+            .upsert("movie:second", 64.0, 1400, 2200)
+            .expect("second upsert should succeed");
+
+        let entries = store.list().expect("list should succeed");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].id, "movie:second");
+        assert_eq!(entries[1].id, "movie:first");
+    }
+
+    #[test]
+    fn upsert_overwrites_existing_entry() {
+        let db_path = temp_db_path("overwrite");
+        let store = WatchProgressStore::open_at_path(&db_path).expect("store should open");
+
+        store
+            .upsert("movie:shared", 18.0, 300, 1800)
+            .expect("initial upsert should succeed");
+        let initial = store
+            .get("movie:shared")
+            .expect("get should succeed")
+            .expect("entry should exist");
+
+        std::thread::sleep(Duration::from_millis(2));
+        store
+            .upsert("movie:shared", 42.0, 760, 1800)
+            .expect("update upsert should succeed");
+
+        let updated = store
+            .get("movie:shared")
+            .expect("get should succeed")
+            .expect("entry should exist");
+        assert_eq!(updated.progress_percent, 42.0);
+        assert_eq!(updated.position_seconds, 760);
+        assert!(updated.updated_at_ms >= initial.updated_at_ms);
+    }
+
+    #[test]
+    fn delete_removes_entry() {
+        let db_path = temp_db_path("delete");
+        let store = WatchProgressStore::open_at_path(&db_path).expect("store should open");
+
+        store
+            .upsert("movie:gone", 30.0, 500, 1600)
+            .expect("upsert should succeed");
+        store.delete("movie:gone").expect("delete should succeed");
+
+        let entry = store.get("movie:gone").expect("get should succeed");
+        assert!(entry.is_none());
+    }
+
+    fn temp_db_path(test_name: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        path.push(format!(
+            "sol_watch_progress_{test_name}_{}_{}.sqlite3",
+            std::process::id(),
+            now
+        ));
+        path
     }
 }

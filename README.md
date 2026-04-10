@@ -9,6 +9,7 @@ The first pass gives you:
 - a minimal `tauri` desktop shell with a static frontend
 - seeded catalog, search, home-feed, and stream data
 - provider and service layers so metadata and streams can come from different backends
+- SQLite-backed watch progress for Continue Watching state
 - an optional `axum` server binary for API experimentation
 
 ## Run the desktop app
@@ -41,6 +42,19 @@ Then open `http://127.0.0.1:3000` and try:
 - `GET /api/meta/movie:solstice`
 - `GET /api/search?q=sci-fi`
 - `GET /api/streams/movie:solstice`
+- `GET /api/watch-progress`
+- `PUT /api/watch-progress/movie:solstice`
+- `DELETE /api/watch-progress/movie:solstice`
+
+Example upsert payload:
+
+```json
+{
+  "progress_percent": 48.7,
+  "position_seconds": 3640,
+  "duration_seconds": 7480
+}
+```
 
 ## Addon shape
 
@@ -77,6 +91,12 @@ Optional for the next stream step:
 export TORBOX_API_KEY=your_torbox_api_key
 ```
 
+Optional watch progress database override:
+
+```bash
+export SOL_DB_PATH=/absolute/path/to/sol.sqlite3
+```
+
 ## Current addon behavior
 
 For TMDB-backed movie items, the builtin addons now:
@@ -99,9 +119,16 @@ You can inspect the current addon registry through:
 
 - `GET /api/addons`
 
+## Watch progress storage
+
+- Desktop playback progress is persisted in SQLite and powers the Continue Watching block.
+- By default, Sol stores the database in your OS local data directory (`.../sol/sol.sqlite3`).
+- Set `SOL_DB_PATH` if you want to use a shared path across devices/instances.
+- The desktop app and the HTTP API now use the same watch-progress store.
+
 ## Suggested next steps
 
-1. Add real metadata providers and a local library/watch history store with SQLite.
+1. Add real metadata providers and user identity so watch progress can be isolated per user.
 2. Introduce a shared playback/session layer that both desktop and future Android TV clients can consume.
 3. Continue refining the desktop UX and interaction model, then carry that system into an Android TV-focused client.
-4. Add authentication, watchlists, progress tracking, and provider integrations.
+4. Add authentication, watchlists, and deeper provider integrations.
