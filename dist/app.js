@@ -36,6 +36,7 @@ const WATCH_PROGRESS_MIN_PERCENT = 3;
 const WATCH_PROGRESS_COMPLETE_PERCENT = 95;
 const WATCH_PROGRESS_MAX_ITEMS = 8;
 const WATCH_PROGRESS_SAVE_INTERVAL_MS = 4000;
+const ARTWORK_PRELOAD_TIMEOUT_MS = 900;
 
 let activeFilter = "";
 let itemCache = new Map();
@@ -680,12 +681,23 @@ function bindHeroButtons() {
 async function selectItem(id, options = {}) {
   const { autoPlay = false, resumeEntry = null } = options;
   const requestToken = ++selectItemRequestToken;
-  renderPlayerLoadingState(id);
+  renderPlayerLoadingState(id, {
+    phase: "Resolving title and stream providers...",
+    resumeEntry,
+  });
   try {
-    const item = await getItem(id);
+    const itemPromise = getItem(id);
+    const lookupPromise = invoke("get_stream_lookup", { id });
+    const item = await itemPromise;
     if (requestToken !== selectItemRequestToken) {
       return;
     }
+    renderPlayerLoadingState(id, {
+      item,
+      phase: "Connecting to available sources...",
+      resumeEntry,
+    });
+    await preloadArtworkAsset(item);
     if (id !== selectedItemId) {
       stopTorboxAutoRefresh();
       torboxSubmissionState = null;
@@ -696,10 +708,15 @@ async function selectItem(id, options = {}) {
     }
     resetPlaybackSession();
     selectedItemId = id;
-    selectedLookup = await invoke("get_stream_lookup", { id });
+    selectedLookup = await lookupPromise;
     if (requestToken !== selectItemRequestToken) {
       return;
     }
+    renderPlayerLoadingState(id, {
+      item,
+      phase: "Preparing playback session...",
+      resumeEntry,
+    });
     const lookupStreams = selectedLookup.streams ?? [];
     selectedStreams = filterDisplayStreams(lookupStreams);
     if (lookupStreams.length > 0 && selectedStreams.length === 0) {
@@ -787,12 +804,30 @@ function normalizeStreamField(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function renderPlayerLoadingState(id) {
-  const cached = itemCache.get(id);
+function renderPlayerLoadingState(id, options = {}) {
+  const {
+    item = null,
+    phase = "Resolving title and stream providers...",
+    resumeEntry = null,
+  } = options;
+  const cached = item ?? itemCache.get(id);
   const title = cached?.title ? escapeHtml(cached.title) : "Loading title";
   const description = cached?.description
     ? escapeHtml(cached.description)
     : "Fetching metadata and stream sources...";
+  const resumeLabel = formatResumeForLoading(resumeEntry);
+  const sourceLabel = formatSourceForLoading(resumeEntry);
+  const summaryBits = [];
+  if (cached?.year) {
+    summaryBits.push(String(cached.year));
+  }
+  if (cached?.media_type) {
+    summaryBits.push(String(cached.media_type));
+  }
+  if (Array.isArray(cached?.genres) && cached.genres.length > 0) {
+    summaryBits.push(cached.genres.join(" / "));
+  }
+  const summary = summaryBits.join(" • ");
 
   playerStageEl.innerHTML = `
     <div class="player-screen">
@@ -800,9 +835,11 @@ function renderPlayerLoadingState(id) {
         ${cached ? renderArtworkImage(cached, "player-poster") : ""}
       </div>
       <div class="player-overlay player-overlay-loading">
-        <p class="eyebrow">Player</p>
+        <p class="eyebrow">Loading</p>
         <h2>${title}</h2>
+        ${summary ? `<p class="player-loading-summary">${escapeHtml(summary)}</p>` : ""}
         <p>${description}</p>
+        <p class="player-loading-phase">${escapeHtml(phase)}</p>
       </div>
     </div>
   `;
@@ -810,13 +847,54 @@ function renderPlayerLoadingState(id) {
   playerDetailsEl.innerHTML = `
     <article class="player-details-card player-loading-card">
       <p class="eyebrow">Preparing playback</p>
-      <p>Loading stream sources for this title...</p>
+      <p>${escapeHtml(phase)}</p>
+      <div class="player-loading-meta-grid">
+        <p><strong>Resume:</strong> ${escapeHtml(resumeLabel)}</p>
+        <p><strong>Source:</strong> ${escapeHtml(sourceLabel)}</p>
+      </div>
       <div class="loading-pulse"></div>
     </article>
   `;
 
   streamsEl.classList.add("empty");
   streamsEl.textContent = "Loading available stream sources...";
+}
+
+function formatResumeForLoading(resumeEntry) {
+  const seconds = Number(resumeEntry?.position_seconds || 0);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return "From start";
+  }
+  return formatDuration(seconds);
+}
+
+function formatSourceForLoading(resumeEntry) {
+  if (!resumeEntry) {
+    return "Selecting best source";
+  }
+  const provider = String(resumeEntry.source_provider || "").trim();
+  const name = String(resumeEntry.source_name || "").trim();
+  if (provider && name) {
+    return `${provider} • ${name}`;
+  }
+  return provider || name || "Selecting best source";
+}
+
+async function preloadArtworkAsset(item) {
+  const url = heroArtworkUrl(item);
+  if (!url) {
+    return;
+  }
+
+  const image = new Image();
+  image.src = url;
+  const decodePromise = typeof image.decode === "function"
+    ? image.decode().catch(() => undefined)
+    : Promise.resolve();
+  const timeoutPromise = new Promise((resolve) => {
+    window.setTimeout(resolve, ARTWORK_PRELOAD_TIMEOUT_MS);
+  });
+  await Promise.race([decodePromise, timeoutPromise]);
 }
 
 async function getItem(id) {
@@ -1416,7 +1494,6 @@ function renderStreams(itemOrTitle) {
   streamsEl.querySelectorAll("[data-stream-index]").forEach((button) => {
     button.addEventListener("click", async () => {
       const resumeAt = getCurrentPlaybackSeconds();
-      const shouldResume = playbackActivated && isPlaying;
       selectedStreamIndex = Number(button.dataset.streamIndex);
       syncSeriesSelectionFromStream(selectedStreams[selectedStreamIndex]);
       playbackActivated = true;
@@ -1425,10 +1502,7 @@ function renderStreams(itemOrTitle) {
       setPlaybackState(false);
       renderPlayer(item);
       renderStreams(item);
-
-      if (shouldResume) {
-        setPlaybackState(true);
-      }
+      setPlaybackState(true);
     });
   });
 

@@ -1129,6 +1129,37 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
   gap: 12px;
 }
 
+.player-loading-summary {
+  color: #dbe4f4;
+  font-size: 0.9rem;
+}
+
+.player-loading-phase {
+  color: var(--accent);
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
+}
+
+.player-loading-meta-grid {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(8, 22, 37, 0.58);
+}
+
+.player-loading-meta-grid p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.player-loading-meta-grid strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .loading-pulse {
   height: 10px;
   border-radius: 999px;
