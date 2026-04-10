@@ -117,6 +117,13 @@ pub struct WatchProgressEntry {
     pub position_seconds: u32,
     pub duration_seconds: u32,
     pub updated_at_ms: i64,
+    pub source_provider: Option<String>,
+    pub source_name: Option<String>,
+    pub source_quality: Option<String>,
+    pub source_language: Option<String>,
+    pub source_url: Option<String>,
+    pub source_playback_kind: Option<String>,
+    pub source_fingerprint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

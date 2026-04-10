@@ -159,8 +159,27 @@ fn save_watch_progress(
     progress_percent: f32,
     position_seconds: u32,
     duration_seconds: u32,
+    source_provider: Option<String>,
+    source_name: Option<String>,
+    source_quality: Option<String>,
+    source_language: Option<String>,
+    source_url: Option<String>,
+    source_playback_kind: Option<String>,
+    source_fingerprint: Option<String>,
 ) -> Result<(), String> {
-    state.save_watch_progress(&id, progress_percent, position_seconds, duration_seconds)
+    state.save_watch_progress(
+        &id,
+        progress_percent,
+        position_seconds,
+        duration_seconds,
+        source_provider.as_deref(),
+        source_name.as_deref(),
+        source_quality.as_deref(),
+        source_language.as_deref(),
+        source_url.as_deref(),
+        source_playback_kind.as_deref(),
+        source_fingerprint.as_deref(),
+    )
 }
 
 #[tauri::command]

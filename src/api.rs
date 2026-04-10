@@ -18,6 +18,13 @@ struct WatchProgressPayload {
     progress_percent: f32,
     position_seconds: u32,
     duration_seconds: u32,
+    source_provider: Option<String>,
+    source_name: Option<String>,
+    source_quality: Option<String>,
+    source_language: Option<String>,
+    source_url: Option<String>,
+    source_playback_kind: Option<String>,
+    source_fingerprint: Option<String>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -120,6 +127,13 @@ async fn upsert_watch_progress(
         payload.progress_percent,
         payload.position_seconds,
         payload.duration_seconds,
+        payload.source_provider.as_deref(),
+        payload.source_name.as_deref(),
+        payload.source_quality.as_deref(),
+        payload.source_language.as_deref(),
+        payload.source_url.as_deref(),
+        payload.source_playback_kind.as_deref(),
+        payload.source_fingerprint.as_deref(),
     ) {
         Ok(()) => StatusCode::NO_CONTENT,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,

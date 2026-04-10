@@ -94,9 +94,27 @@ impl AppState {
         progress_percent: f32,
         position_seconds: u32,
         duration_seconds: u32,
+        source_provider: Option<&str>,
+        source_name: Option<&str>,
+        source_quality: Option<&str>,
+        source_language: Option<&str>,
+        source_url: Option<&str>,
+        source_playback_kind: Option<&str>,
+        source_fingerprint: Option<&str>,
     ) -> Result<(), String> {
-        self.services
-            .save_watch_progress(id, progress_percent, position_seconds, duration_seconds)
+        self.services.save_watch_progress(
+            id,
+            progress_percent,
+            position_seconds,
+            duration_seconds,
+            source_provider,
+            source_name,
+            source_quality,
+            source_language,
+            source_url,
+            source_playback_kind,
+            source_fingerprint,
+        )
     }
 
     pub fn delete_watch_progress(&self, id: &str) -> Result<(), String> {

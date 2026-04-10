@@ -39,13 +39,27 @@ impl WatchProgressStore {
                     progress_percent REAL NOT NULL,
                     position_seconds INTEGER NOT NULL,
                     duration_seconds INTEGER NOT NULL,
-                    updated_at_ms INTEGER NOT NULL
+                    updated_at_ms INTEGER NOT NULL,
+                    source_provider TEXT,
+                    source_name TEXT,
+                    source_quality TEXT,
+                    source_language TEXT,
+                    source_url TEXT,
+                    source_playback_kind TEXT,
+                    source_fingerprint TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_watch_progress_updated_at
                 ON watch_progress(updated_at_ms DESC);
                 ",
             )
             .map_err(|error| format!("Could not initialize watch progress schema: {error}"))?;
+        ensure_column(&connection, "source_provider", "TEXT")?;
+        ensure_column(&connection, "source_name", "TEXT")?;
+        ensure_column(&connection, "source_quality", "TEXT")?;
+        ensure_column(&connection, "source_language", "TEXT")?;
+        ensure_column(&connection, "source_url", "TEXT")?;
+        ensure_column(&connection, "source_playback_kind", "TEXT")?;
+        ensure_column(&connection, "source_fingerprint", "TEXT")?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(connection)),
@@ -60,7 +74,19 @@ impl WatchProgressStore {
         let mut statement = conn
             .prepare(
                 "
-                SELECT id, progress_percent, position_seconds, duration_seconds, updated_at_ms
+                SELECT
+                    id,
+                    progress_percent,
+                    position_seconds,
+                    duration_seconds,
+                    updated_at_ms,
+                    source_provider,
+                    source_name,
+                    source_quality,
+                    source_language,
+                    source_url,
+                    source_playback_kind,
+                    source_fingerprint
                 FROM watch_progress
                 ORDER BY updated_at_ms DESC
                 ",
@@ -75,6 +101,13 @@ impl WatchProgressStore {
                     position_seconds: row.get(2)?,
                     duration_seconds: row.get(3)?,
                     updated_at_ms: row.get(4)?,
+                    source_provider: row.get(5)?,
+                    source_name: row.get(6)?,
+                    source_quality: row.get(7)?,
+                    source_language: row.get(8)?,
+                    source_url: row.get(9)?,
+                    source_playback_kind: row.get(10)?,
+                    source_fingerprint: row.get(11)?,
                 })
             })
             .map_err(|error| format!("Could not read watch progress rows: {error}"))?;
@@ -93,6 +126,13 @@ impl WatchProgressStore {
         progress_percent: f32,
         position_seconds: u32,
         duration_seconds: u32,
+        source_provider: Option<&str>,
+        source_name: Option<&str>,
+        source_quality: Option<&str>,
+        source_language: Option<&str>,
+        source_url: Option<&str>,
+        source_playback_kind: Option<&str>,
+        source_fingerprint: Option<&str>,
     ) -> Result<(), String> {
         let updated_at_ms = now_unix_ms();
         let conn = self
@@ -107,21 +147,42 @@ impl WatchProgressStore {
                 progress_percent,
                 position_seconds,
                 duration_seconds,
-                updated_at_ms
+                updated_at_ms,
+                source_provider,
+                source_name,
+                source_quality,
+                source_language,
+                source_url,
+                source_playback_kind,
+                source_fingerprint
             )
-            VALUES (?1, ?2, ?3, ?4, ?5)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             ON CONFLICT(id) DO UPDATE SET
                 progress_percent = excluded.progress_percent,
                 position_seconds = excluded.position_seconds,
                 duration_seconds = excluded.duration_seconds,
-                updated_at_ms = excluded.updated_at_ms
+                updated_at_ms = excluded.updated_at_ms,
+                source_provider = excluded.source_provider,
+                source_name = excluded.source_name,
+                source_quality = excluded.source_quality,
+                source_language = excluded.source_language,
+                source_url = excluded.source_url,
+                source_playback_kind = excluded.source_playback_kind,
+                source_fingerprint = excluded.source_fingerprint
             ",
             params![
                 id,
                 progress_percent,
                 i64::from(position_seconds),
                 i64::from(duration_seconds),
-                updated_at_ms
+                updated_at_ms,
+                source_provider,
+                source_name,
+                source_quality,
+                source_language,
+                source_url,
+                source_playback_kind,
+                source_fingerprint
             ],
         )
         .map_err(|error| format!("Could not save watch progress: {error}"))?;
@@ -146,7 +207,19 @@ impl WatchProgressStore {
             .map_err(|_| "Watch progress lock poisoned")?;
         conn.query_row(
             "
-            SELECT id, progress_percent, position_seconds, duration_seconds, updated_at_ms
+            SELECT
+                id,
+                progress_percent,
+                position_seconds,
+                duration_seconds,
+                updated_at_ms,
+                source_provider,
+                source_name,
+                source_quality,
+                source_language,
+                source_url,
+                source_playback_kind,
+                source_fingerprint
             FROM watch_progress
             WHERE id = ?1
             ",
@@ -158,6 +231,13 @@ impl WatchProgressStore {
                     position_seconds: row.get(2)?,
                     duration_seconds: row.get(3)?,
                     updated_at_ms: row.get(4)?,
+                    source_provider: row.get(5)?,
+                    source_name: row.get(6)?,
+                    source_quality: row.get(7)?,
+                    source_language: row.get(8)?,
+                    source_url: row.get(9)?,
+                    source_playback_kind: row.get(10)?,
+                    source_fingerprint: row.get(11)?,
                 })
             },
         )
@@ -193,6 +273,36 @@ fn now_unix_ms() -> i64 {
     }
 }
 
+fn ensure_column(
+    connection: &Connection,
+    column_name: &str,
+    column_type: &str,
+) -> Result<(), String> {
+    let mut statement = connection
+        .prepare("PRAGMA table_info(watch_progress)")
+        .map_err(|error| format!("Could not inspect watch progress schema: {error}"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| format!("Could not inspect watch progress columns: {error}"))?;
+
+    for column in columns {
+        if column.map_err(|error| format!("Could not inspect watch progress column: {error}"))?
+            == column_name
+        {
+            return Ok(());
+        }
+    }
+
+    connection
+        .execute(
+            &format!("ALTER TABLE watch_progress ADD COLUMN {column_name} {column_type}"),
+            [],
+        )
+        .map_err(|error| format!("Could not migrate watch progress schema: {error}"))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -208,16 +318,42 @@ mod tests {
         let store = WatchProgressStore::open_at_path(&db_path).expect("store should open");
 
         store
-            .upsert("movie:first", 12.5, 220, 1760)
+            .upsert(
+                "movie:first",
+                12.5,
+                220,
+                1760,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .expect("first upsert should succeed");
         std::thread::sleep(Duration::from_millis(2));
         store
-            .upsert("movie:second", 64.0, 1400, 2200)
+            .upsert(
+                "movie:second",
+                64.0,
+                1400,
+                2200,
+                Some("TorBox"),
+                Some("Primary CDN"),
+                Some("1080p"),
+                Some("EN"),
+                Some("https://stream.example.com/second"),
+                Some("embedded"),
+                Some("TorBox|Primary CDN|1080p|EN"),
+            )
             .expect("second upsert should succeed");
 
         let entries = store.list().expect("list should succeed");
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].id, "movie:second");
+        assert_eq!(entries[0].source_provider.as_deref(), Some("TorBox"));
+        assert_eq!(entries[0].source_name.as_deref(), Some("Primary CDN"));
         assert_eq!(entries[1].id, "movie:first");
     }
 
@@ -227,7 +363,19 @@ mod tests {
         let store = WatchProgressStore::open_at_path(&db_path).expect("store should open");
 
         store
-            .upsert("movie:shared", 18.0, 300, 1800)
+            .upsert(
+                "movie:shared",
+                18.0,
+                300,
+                1800,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .expect("initial upsert should succeed");
         let initial = store
             .get("movie:shared")
@@ -236,7 +384,19 @@ mod tests {
 
         std::thread::sleep(Duration::from_millis(2));
         store
-            .upsert("movie:shared", 42.0, 760, 1800)
+            .upsert(
+                "movie:shared",
+                42.0,
+                760,
+                1800,
+                Some("Demo Catalog"),
+                Some("Fallback Source"),
+                Some("720p"),
+                Some("EN"),
+                Some("https://stream.example.com/shared"),
+                Some("embedded"),
+                Some("Demo Catalog|Fallback Source|720p|EN"),
+            )
             .expect("update upsert should succeed");
 
         let updated = store
@@ -245,6 +405,8 @@ mod tests {
             .expect("entry should exist");
         assert_eq!(updated.progress_percent, 42.0);
         assert_eq!(updated.position_seconds, 760);
+        assert_eq!(updated.source_quality.as_deref(), Some("720p"));
+        assert_eq!(updated.source_playback_kind.as_deref(), Some("embedded"));
         assert!(updated.updated_at_ms >= initial.updated_at_ms);
     }
 
@@ -254,7 +416,19 @@ mod tests {
         let store = WatchProgressStore::open_at_path(&db_path).expect("store should open");
 
         store
-            .upsert("movie:gone", 30.0, 500, 1600)
+            .upsert(
+                "movie:gone",
+                30.0,
+                500,
+                1600,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .expect("upsert should succeed");
         store.delete("movie:gone").expect("delete should succeed");
 

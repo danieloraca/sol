@@ -621,6 +621,24 @@ function bindCatalogButtons(scope) {
   });
 }
 
+function bindContinueWatchingButtons() {
+  if (!continueWatchingEl) {
+    return;
+  }
+
+  continueWatchingEl.querySelectorAll("[data-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.dataset.id;
+      const resumeEntry = watchProgressById[id] ?? null;
+      showPlayerView({ returnTo: "main" });
+      await selectItem(id, {
+        autoPlay: true,
+        resumeEntry,
+      });
+    });
+  });
+}
+
 function bindHeroButtons() {
   heroEl.querySelectorAll("[data-play-hero], [data-open-hero]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -632,7 +650,7 @@ function bindHeroButtons() {
 }
 
 async function selectItem(id, options = {}) {
-  const { autoPlay = false } = options;
+  const { autoPlay = false, resumeEntry = null } = options;
   const requestToken = ++selectItemRequestToken;
   renderPlayerLoadingState(id);
   try {
@@ -656,11 +674,20 @@ async function selectItem(id, options = {}) {
     }
     selectedStreams = selectedLookup.streams ?? [];
     selectedStreamIndex = 0;
+    if (resumeEntry?.source_fingerprint || resumeEntry?.source_url) {
+      const matchedSourceIndex = matchResumeSourceIndex(selectedStreams, resumeEntry);
+      if (matchedSourceIndex >= 0) {
+        selectedStreamIndex = matchedSourceIndex;
+      }
+    }
     selectedStreamProviderFilter = "all";
     playbackActivated = Boolean(autoPlay);
     playbackPercent = 0;
-    playbackCurrentSeconds = 0;
+    playbackCurrentSeconds = resumeEntry?.position_seconds
+      ? Math.max(0, Number(resumeEntry.position_seconds) || 0)
+      : 0;
     playbackDurationSeconds = estimateRuntimeSeconds(item);
+    pendingSeekSeconds = playbackCurrentSeconds > 0 ? playbackCurrentSeconds : null;
     lastPlaybackError = "";
     lastPlaybackNotice = "";
     if (selectedStreams.length > 0) {
@@ -684,6 +711,42 @@ async function selectItem(id, options = {}) {
     }
     renderShellError(String(error));
   }
+}
+
+function matchResumeSourceIndex(streams, resumeEntry) {
+  if (!Array.isArray(streams) || streams.length === 0 || !resumeEntry) {
+    return -1;
+  }
+
+  const targetFingerprint = String(resumeEntry.source_fingerprint || "").trim();
+  const targetUrl = String(resumeEntry.source_url || "").trim();
+
+  if (targetFingerprint) {
+    const byFingerprint = streams.findIndex((stream) => streamFingerprint(stream) === targetFingerprint);
+    if (byFingerprint >= 0) {
+      return byFingerprint;
+    }
+  }
+
+  if (targetUrl) {
+    const byUrl = streams.findIndex((stream) => String(stream?.url || "").trim() === targetUrl);
+    if (byUrl >= 0) {
+      return byUrl;
+    }
+  }
+
+  const byMetadata = streams.findIndex((stream) => (
+    normalizeStreamField(stream?.provider) === normalizeStreamField(resumeEntry.source_provider)
+    && normalizeStreamField(stream?.name) === normalizeStreamField(resumeEntry.source_name)
+    && normalizeStreamField(stream?.quality) === normalizeStreamField(resumeEntry.source_quality)
+    && normalizeStreamField(stream?.language) === normalizeStreamField(resumeEntry.source_language)
+  ));
+
+  return byMetadata;
+}
+
+function normalizeStreamField(value) {
+  return String(value || "").trim().toLowerCase();
 }
 
 function renderPlayerLoadingState(id) {
@@ -1996,7 +2059,7 @@ function syncPlaybackFromVideo(item, stream, video) {
   playbackPercent = playbackDurationSeconds > 0
     ? Math.min(100, (playbackCurrentSeconds / playbackDurationSeconds) * 100)
     : 0;
-  recordWatchProgress(item, playbackCurrentSeconds, playbackDurationSeconds);
+  recordWatchProgress(item, playbackCurrentSeconds, playbackDurationSeconds, stream);
   syncPlayerUi(item, stream);
 }
 
@@ -2114,7 +2177,7 @@ function seekPlayerTo(targetSeconds, video = document.querySelector("#player-vid
 
   playbackCurrentSeconds = boundedTime;
   playbackPercent = duration > 0 ? Math.min(100, (boundedTime / duration) * 100) : 0;
-  recordWatchProgress(item, playbackCurrentSeconds, duration);
+  recordWatchProgress(item, playbackCurrentSeconds, duration, stream);
 
   if (video) {
     video.currentTime = boundedTime;
@@ -2403,6 +2466,7 @@ function renderCard(item, options = {}) {
     && progressPercent >= WATCH_PROGRESS_MIN_PERCENT
     && progressPercent < WATCH_PROGRESS_COMPLETE_PERCENT;
   const remaining = shouldShowProgress ? formatRemainingWatchTime(progressEntry) : "";
+  const sourceLabel = shouldShowProgress ? formatSavedSourceLabel(progressEntry) : "";
 
   return `
     <article class="card">
@@ -2417,6 +2481,7 @@ function renderCard(item, options = {}) {
                     <div class="card-progress-value" style="width: ${progressPercent.toFixed(2)}%"></div>
                   </div>
                   <p class="card-progress-meta">${Math.round(progressPercent)}% watched${remaining ? ` • ${escapeHtml(remaining)} left` : ""}</p>
+                  ${sourceLabel ? `<p class="card-progress-source">${escapeHtml(sourceLabel)}</p>` : ""}
                 </div>
               `
               : ""
@@ -2490,10 +2555,10 @@ function renderContinueWatchingRail() {
 
   continueWatchingEl.innerHTML = visible.map((item) => renderCard(item, { showProgress: true })).join("");
   continueSectionEl?.classList.remove("is-empty");
-  bindCatalogButtons(continueWatchingEl);
+  bindContinueWatchingButtons();
 }
 
-function recordWatchProgress(item, positionSeconds, durationSeconds) {
+function recordWatchProgress(item, positionSeconds, durationSeconds, stream = null) {
   if (!item?.id) {
     return;
   }
@@ -2528,6 +2593,13 @@ function recordWatchProgress(item, positionSeconds, durationSeconds) {
     position_seconds: Math.round(position),
     duration_seconds: Math.round(duration),
     updated_at_ms: now,
+    source_provider: stream?.provider || null,
+    source_name: stream?.name || null,
+    source_quality: stream?.quality || null,
+    source_language: stream?.language || null,
+    source_url: stream?.url || null,
+    source_playback_kind: stream?.playback_kind || null,
+    source_fingerprint: stream ? streamFingerprint(stream) : null,
   };
   watchProgressLastSavedAt.set(item.id, now);
   void persistWatchProgressToStore(item.id);
@@ -2579,6 +2651,18 @@ function formatRemainingWatchTime(progressEntry) {
   return `${hours} hr ${minutes} min`;
 }
 
+function formatSavedSourceLabel(progressEntry) {
+  if (!progressEntry) {
+    return "";
+  }
+  const provider = String(progressEntry.source_provider || "").trim();
+  const name = String(progressEntry.source_name || "").trim();
+  if (provider && name) {
+    return `${provider} • ${name}`;
+  }
+  return provider || name || "";
+}
+
 async function hydrateWatchProgressFromStore() {
   if (!invoke) {
     watchProgressById = {};
@@ -2601,6 +2685,13 @@ async function hydrateWatchProgressFromStore() {
         position_seconds: Math.max(0, Number(entry.position_seconds) || 0),
         duration_seconds: Math.max(0, Number(entry.duration_seconds) || 0),
         updated_at_ms: Number(entry.updated_at_ms) || Date.now(),
+        source_provider: entry.source_provider || null,
+        source_name: entry.source_name || null,
+        source_quality: entry.source_quality || null,
+        source_language: entry.source_language || null,
+        source_url: entry.source_url || null,
+        source_playback_kind: entry.source_playback_kind || null,
+        source_fingerprint: entry.source_fingerprint || null,
       };
     });
     watchProgressById = normalized;
@@ -2625,6 +2716,13 @@ async function persistWatchProgressToStore(itemId) {
       progressPercent: entry.progress_percent,
       positionSeconds: entry.position_seconds,
       durationSeconds: entry.duration_seconds,
+      sourceProvider: entry.source_provider || null,
+      sourceName: entry.source_name || null,
+      sourceQuality: entry.source_quality || null,
+      sourceLanguage: entry.source_language || null,
+      sourceUrl: entry.source_url || null,
+      sourcePlaybackKind: entry.source_playback_kind || null,
+      sourceFingerprint: entry.source_fingerprint || null,
     });
   } catch (_error) {
     // Ignore transient persistence errors; in-memory progress still drives current UI.
@@ -2650,6 +2748,19 @@ function renderArtworkImage(item, className) {
 
 function heroArtworkUrl(item) {
   return item?.backdrop_url || item?.poster_url || "";
+}
+
+function streamFingerprint(stream) {
+  if (!stream) {
+    return "";
+  }
+
+  return [
+    normalizeStreamField(stream.provider),
+    normalizeStreamField(stream.name),
+    normalizeStreamField(stream.quality),
+    normalizeStreamField(stream.language),
+  ].join("|");
 }
 
 function playbackKindLabel(stream) {
