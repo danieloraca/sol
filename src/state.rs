@@ -4,7 +4,7 @@ use crate::{
     addons::MoveDirection,
     domain::{
         AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, MediaType, StreamLookup,
-        StreamSource,
+        StreamSource, WatchProgressEntry,
     },
     services::AppServices,
 };
@@ -82,5 +82,24 @@ impl AppState {
         direction: MoveDirection,
     ) -> Result<(), String> {
         self.services.move_remote_addon(manifest_url, direction)
+    }
+
+    pub fn watch_progress(&self) -> Result<Vec<WatchProgressEntry>, String> {
+        self.services.watch_progress()
+    }
+
+    pub fn save_watch_progress(
+        &self,
+        id: &str,
+        progress_percent: f32,
+        position_seconds: u32,
+        duration_seconds: u32,
+    ) -> Result<(), String> {
+        self.services
+            .save_watch_progress(id, progress_percent, position_seconds, duration_seconds)
+    }
+
+    pub fn delete_watch_progress(&self, id: &str) -> Result<(), String> {
+        self.services.delete_watch_progress(id)
     }
 }

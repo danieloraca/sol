@@ -5,3 +5,4 @@ pub mod domain;
 pub mod providers;
 pub mod services;
 pub mod state;
+pub mod storage;

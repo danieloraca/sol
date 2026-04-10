@@ -110,6 +110,15 @@ pub struct HomeFeed {
     pub continue_watching: Vec<MediaItem>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WatchProgressEntry {
+    pub id: String,
+    pub progress_percent: f32,
+    pub position_seconds: u32,
+    pub duration_seconds: u32,
+    pub updated_at_ms: i64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ApiMessage {
     pub name: String,

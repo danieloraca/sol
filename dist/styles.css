@@ -516,6 +516,20 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
   margin-bottom: 14px;
 }
 
+.continue-section {
+  padding: var(--surface-padding);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-surface-lg);
+  background:
+    radial-gradient(circle at top right, rgba(125, 249, 208, 0.12), transparent 34%),
+    linear-gradient(160deg, rgba(8, 22, 36, 0.92), rgba(7, 18, 31, 0.78));
+  box-shadow: var(--shadow);
+}
+
+.continue-section.is-empty .continue-rail {
+  grid-template-columns: 1fr;
+}
+
 .rail,
 .catalog-grid,
 .streams,
@@ -598,6 +612,57 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
 
 .poster.is-fallback::after {
   background: linear-gradient(180deg, rgba(7, 17, 31, 0.04), rgba(7, 17, 31, 0.28));
+}
+
+.card-progress-overlay {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  display: grid;
+  gap: 6px;
+}
+
+.card-progress-bar {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.34);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.card-progress-value {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+}
+
+.card-progress-meta {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+}
+
+.continue-empty {
+  margin: 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-surface-md);
+  background: rgba(10, 24, 39, 0.84);
+}
+
+.continue-empty p {
+  margin: 0;
+}
+
+.continue-empty .meta {
+  margin-top: 6px;
 }
 
 .card h3,

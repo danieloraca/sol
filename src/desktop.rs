@@ -3,7 +3,10 @@ use tauri::Manager;
 
 use crate::{
     addons::MoveDirection,
-    domain::{AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, StreamLookup, StreamSource},
+    domain::{
+        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, StreamLookup, StreamSource,
+        WatchProgressEntry,
+    },
     state::AppState,
 };
 
@@ -140,6 +143,32 @@ async fn submit_torbox_magnet(
 }
 
 #[tauri::command]
+async fn get_watch_progress(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<WatchProgressEntry>, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.watch_progress())
+        .await
+        .map_err(|error| format!("Watch progress task failed: {error}"))?
+}
+
+#[tauri::command]
+fn save_watch_progress(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    progress_percent: f32,
+    position_seconds: u32,
+    duration_seconds: u32,
+) -> Result<(), String> {
+    state.save_watch_progress(&id, progress_percent, position_seconds, duration_seconds)
+}
+
+#[tauri::command]
+fn delete_watch_progress(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    state.delete_watch_progress(&id)
+}
+
+#[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
     let url = url.trim().to_string();
     if !(url.starts_with("http://") || url.starts_with("https://")) {
@@ -228,6 +257,9 @@ pub fn run() {
             get_stream_lookup,
             get_streams,
             submit_torbox_magnet,
+            get_watch_progress,
+            save_watch_progress,
+            delete_watch_progress,
             open_external_url,
             toggle_window_maximize,
             toggle_window_fullscreen

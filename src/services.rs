@@ -8,8 +8,9 @@ use crate::{
     addons::{AddonRegistry, AddonStore, MoveDirection, RemoteHttpAddon, SolAddon},
     domain::{
         AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, MediaType, StreamLookup,
-        StreamSource,
+        StreamSource, WatchProgressEntry,
     },
+    storage::WatchProgressStore,
 };
 
 #[derive(Clone)]
@@ -17,6 +18,7 @@ pub struct AppServices {
     addons: Arc<RwLock<AddonRegistry>>,
     cache: Arc<RwLock<ServiceCache>>,
     store: AddonStore,
+    watch_progress: WatchProgressStore,
 }
 
 const HOME_FEED_TTL: Duration = Duration::from_secs(20);
@@ -56,11 +58,14 @@ impl AppServices {
     pub fn demo() -> Self {
         let store = AddonStore::default();
         let registry = AddonRegistry::from_manifest_urls(&store.enabled_urls());
+        let watch_progress =
+            WatchProgressStore::new().expect("watch progress store should initialize");
 
         Self {
             addons: Arc::new(RwLock::new(registry)),
             cache: Arc::new(RwLock::new(ServiceCache::default())),
             store,
+            watch_progress,
         }
     }
 
@@ -358,6 +363,25 @@ impl AppServices {
         self.store.move_remote_addon(manifest_url, direction)?;
         self.reload_registry();
         Ok(())
+    }
+
+    pub fn watch_progress(&self) -> Result<Vec<WatchProgressEntry>, String> {
+        self.watch_progress.list()
+    }
+
+    pub fn save_watch_progress(
+        &self,
+        id: &str,
+        progress_percent: f32,
+        position_seconds: u32,
+        duration_seconds: u32,
+    ) -> Result<(), String> {
+        self.watch_progress
+            .upsert(id, progress_percent, position_seconds, duration_seconds)
+    }
+
+    pub fn delete_watch_progress(&self, id: &str) -> Result<(), String> {
+        self.watch_progress.delete(id)
     }
 
     fn reload_registry(&self) {

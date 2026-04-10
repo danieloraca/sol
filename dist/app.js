@@ -4,6 +4,7 @@ const heroEl = document.querySelector("#hero");
 const playerStageEl = document.querySelector("#player-stage");
 const playerDetailsEl = document.querySelector("#player-details");
 const trendingEl = document.querySelector("#trending");
+const continueSectionEl = document.querySelector("#continue-section");
 const continueWatchingEl = document.querySelector("#continue-watching");
 const catalogEl = document.querySelector("#catalog");
 const streamsEl = document.querySelector("#streams");
@@ -30,6 +31,11 @@ const filterButtons = [...document.querySelectorAll(".filter")];
 const TORBOX_AUTO_REFRESH_INTERVAL_MS = 5000;
 const TORBOX_AUTO_REFRESH_MAX_ATTEMPTS = 24;
 const PLAYBACK_START_TIMEOUT_MS = 4000;
+const WATCH_PROGRESS_MIN_SECONDS = 30;
+const WATCH_PROGRESS_MIN_PERCENT = 3;
+const WATCH_PROGRESS_COMPLETE_PERCENT = 95;
+const WATCH_PROGRESS_MAX_ITEMS = 8;
+const WATCH_PROGRESS_SAVE_INTERVAL_MS = 4000;
 
 let activeFilter = "";
 let itemCache = new Map();
@@ -72,6 +78,8 @@ let isNativeFullscreen = false;
 let fullscreenControlsTimer = null;
 let fullscreenPointerTicking = false;
 let lastFullscreenControlsRefreshMs = 0;
+let watchProgressById = {};
+let watchProgressLastSavedAt = new Map();
 
 async function bootstrap() {
   if (!invoke) {
@@ -79,6 +87,7 @@ async function bootstrap() {
     return;
   }
 
+  await hydrateWatchProgressFromStore();
   await Promise.all([renderHome(), renderCatalog()]);
   window.requestAnimationFrame(() => {
     void renderAddons().catch((error) => {
@@ -214,9 +223,8 @@ async function renderHome() {
   `;
 
   trendingEl.innerHTML = homeFeed.trending.map(renderCard).join("");
-  continueWatchingEl.innerHTML = homeFeed.continue_watching.map(renderCard).join("");
+  renderContinueWatchingRail();
   bindCatalogButtons(trendingEl);
-  bindCatalogButtons(continueWatchingEl);
   bindHeroButtons();
 }
 
@@ -1939,6 +1947,7 @@ function mountPlayer(item, stream) {
     isPlaying = false;
     playbackCurrentSeconds = playbackDurationSeconds || video.duration || playbackCurrentSeconds;
     playbackPercent = 100;
+    clearWatchProgress(item.id);
     syncPlayerUi(item, stream);
   });
 
@@ -1987,6 +1996,7 @@ function syncPlaybackFromVideo(item, stream, video) {
   playbackPercent = playbackDurationSeconds > 0
     ? Math.min(100, (playbackCurrentSeconds / playbackDurationSeconds) * 100)
     : 0;
+  recordWatchProgress(item, playbackCurrentSeconds, playbackDurationSeconds);
   syncPlayerUi(item, stream);
 }
 
@@ -2104,6 +2114,7 @@ function seekPlayerTo(targetSeconds, video = document.querySelector("#player-vid
 
   playbackCurrentSeconds = boundedTime;
   playbackPercent = duration > 0 ? Math.min(100, (boundedTime / duration) * 100) : 0;
+  recordWatchProgress(item, playbackCurrentSeconds, duration);
 
   if (video) {
     video.currentTime = boundedTime;
@@ -2384,16 +2395,240 @@ function formatDuration(totalSeconds) {
   return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function renderCard(item) {
+function renderCard(item, options = {}) {
+  const { showProgress = false } = options;
+  const progressEntry = showProgress ? watchProgressById[item.id] ?? null : null;
+  const progressPercent = clampWatchProgressPercent(progressEntry?.progress_percent ?? 0);
+  const shouldShowProgress = showProgress
+    && progressPercent >= WATCH_PROGRESS_MIN_PERCENT
+    && progressPercent < WATCH_PROGRESS_COMPLETE_PERCENT;
+  const remaining = shouldShowProgress ? formatRemainingWatchTime(progressEntry) : "";
+
   return `
     <article class="card">
       <button data-id="${item.id}" aria-label="${escapeHtml(item.title)}">
         <div class="poster ${item.poster_url ? "" : "is-fallback"}">
           ${renderPosterImage(item, "poster-image")}
+          ${
+            shouldShowProgress
+              ? `
+                <div class="card-progress-overlay">
+                  <div class="card-progress-bar">
+                    <div class="card-progress-value" style="width: ${progressPercent.toFixed(2)}%"></div>
+                  </div>
+                  <p class="card-progress-meta">${Math.round(progressPercent)}% watched${remaining ? ` • ${escapeHtml(remaining)} left` : ""}</p>
+                </div>
+              `
+              : ""
+          }
         </div>
       </button>
     </article>
   `;
+}
+
+function renderContinueWatchingRail() {
+  if (!continueWatchingEl) {
+    return;
+  }
+
+  const itemsById = new Map();
+  const feedItems = Array.isArray(homeFeed?.continue_watching) ? homeFeed.continue_watching : [];
+  feedItems.forEach((item) => {
+    itemsById.set(item.id, item);
+  });
+  catalogItemsCache.forEach((item) => {
+    if (!itemsById.has(item.id)) {
+      itemsById.set(item.id, item);
+    }
+  });
+  for (const [id, item] of itemCache.entries()) {
+    if (!itemsById.has(id)) {
+      itemsById.set(id, item);
+    }
+  }
+
+  const watchedIds = Object.entries(watchProgressById)
+    .filter(([, entry]) => {
+      const progress = clampWatchProgressPercent(entry?.progress_percent ?? 0);
+      return progress >= WATCH_PROGRESS_MIN_PERCENT && progress < WATCH_PROGRESS_COMPLETE_PERCENT;
+    })
+    .sort(([, left], [, right]) => (right?.updated_at_ms ?? 0) - (left?.updated_at_ms ?? 0))
+    .map(([id]) => id);
+
+  const ordered = [];
+  const seen = new Set();
+
+  watchedIds.forEach((id) => {
+    const item = itemsById.get(id);
+    if (!item || seen.has(item.id)) {
+      return;
+    }
+    ordered.push(item);
+    seen.add(item.id);
+  });
+
+  feedItems.forEach((item) => {
+    if (seen.has(item.id)) {
+      return;
+    }
+    ordered.push(item);
+    seen.add(item.id);
+  });
+
+  const visible = ordered.slice(0, WATCH_PROGRESS_MAX_ITEMS);
+  if (visible.length === 0) {
+    continueWatchingEl.innerHTML = `
+      <article class="continue-empty">
+        <p class="eyebrow">Nothing yet</p>
+        <p class="meta">Start playback and Sol will keep your in-progress titles here.</p>
+      </article>
+    `;
+    continueSectionEl?.classList.add("is-empty");
+    return;
+  }
+
+  continueWatchingEl.innerHTML = visible.map((item) => renderCard(item, { showProgress: true })).join("");
+  continueSectionEl?.classList.remove("is-empty");
+  bindCatalogButtons(continueWatchingEl);
+}
+
+function recordWatchProgress(item, positionSeconds, durationSeconds) {
+  if (!item?.id) {
+    return;
+  }
+
+  const duration = Number.isFinite(durationSeconds) && durationSeconds > 0
+    ? durationSeconds
+    : estimateRuntimeSeconds(item);
+  const position = Number.isFinite(positionSeconds) ? Math.max(0, positionSeconds) : 0;
+  const progressPercent = duration > 0 ? (position / duration) * 100 : 0;
+
+  if (progressPercent >= WATCH_PROGRESS_COMPLETE_PERCENT) {
+    clearWatchProgress(item.id);
+    return;
+  }
+
+  if (position < WATCH_PROGRESS_MIN_SECONDS || progressPercent < WATCH_PROGRESS_MIN_PERCENT) {
+    return;
+  }
+
+  const now = Date.now();
+  const previous = watchProgressById[item.id];
+  const previousProgress = clampWatchProgressPercent(previous?.progress_percent ?? 0);
+  const delta = Math.abs(progressPercent - previousProgress);
+  const lastSavedAt = watchProgressLastSavedAt.get(item.id) ?? 0;
+
+  if (now - lastSavedAt < WATCH_PROGRESS_SAVE_INTERVAL_MS && delta < 0.75) {
+    return;
+  }
+
+  watchProgressById[item.id] = {
+    progress_percent: clampWatchProgressPercent(progressPercent),
+    position_seconds: Math.round(position),
+    duration_seconds: Math.round(duration),
+    updated_at_ms: now,
+  };
+  watchProgressLastSavedAt.set(item.id, now);
+  void persistWatchProgressToStore(item.id);
+  renderContinueWatchingRail();
+}
+
+function clearWatchProgress(itemId) {
+  if (!itemId || !watchProgressById[itemId]) {
+    return;
+  }
+  delete watchProgressById[itemId];
+  watchProgressLastSavedAt.delete(itemId);
+  if (invoke) {
+    void invoke("delete_watch_progress", { id: itemId }).catch(() => {});
+  }
+  renderContinueWatchingRail();
+}
+
+function clampWatchProgressPercent(value) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(100, value));
+}
+
+function formatRemainingWatchTime(progressEntry) {
+  if (!progressEntry) {
+    return "";
+  }
+
+  const duration = Number(progressEntry.duration_seconds) || 0;
+  const position = Number(progressEntry.position_seconds) || 0;
+  const remainingSeconds = Math.max(0, duration - position);
+  if (remainingSeconds < 60) {
+    return "under 1 min";
+  }
+
+  const remainingMinutes = Math.ceil(remainingSeconds / 60);
+  if (remainingMinutes < 60) {
+    return `${remainingMinutes} min`;
+  }
+
+  const hours = Math.floor(remainingMinutes / 60);
+  const minutes = remainingMinutes % 60;
+  if (minutes === 0) {
+    return `${hours} hr`;
+  }
+
+  return `${hours} hr ${minutes} min`;
+}
+
+async function hydrateWatchProgressFromStore() {
+  if (!invoke) {
+    watchProgressById = {};
+    return;
+  }
+
+  try {
+    const entries = await invoke("get_watch_progress");
+    const normalized = {};
+    (entries || []).forEach((entry) => {
+      if (!entry || typeof entry !== "object" || !entry.id) {
+        return;
+      }
+      const progressPercent = clampWatchProgressPercent(entry.progress_percent);
+      if (progressPercent >= WATCH_PROGRESS_COMPLETE_PERCENT || progressPercent < WATCH_PROGRESS_MIN_PERCENT) {
+        return;
+      }
+      normalized[entry.id] = {
+        progress_percent: progressPercent,
+        position_seconds: Math.max(0, Number(entry.position_seconds) || 0),
+        duration_seconds: Math.max(0, Number(entry.duration_seconds) || 0),
+        updated_at_ms: Number(entry.updated_at_ms) || Date.now(),
+      };
+    });
+    watchProgressById = normalized;
+  } catch (_error) {
+    watchProgressById = {};
+  }
+}
+
+async function persistWatchProgressToStore(itemId) {
+  if (!invoke || !itemId) {
+    return;
+  }
+
+  const entry = watchProgressById[itemId];
+  if (!entry) {
+    return;
+  }
+
+  try {
+    await invoke("save_watch_progress", {
+      id: itemId,
+      progressPercent: entry.progress_percent,
+      positionSeconds: entry.position_seconds,
+      durationSeconds: entry.duration_seconds,
+    });
+  } catch (_error) {
+    // Ignore transient persistence errors; in-memory progress still drives current UI.
+  }
 }
 
 function renderPosterImage(item, className) {

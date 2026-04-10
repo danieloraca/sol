@@ -4,14 +4,21 @@ use axum::{
     Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::get,
+    routing::{get, put},
 };
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use crate::{
-    domain::{ApiMessage, MediaType},
+    domain::{ApiMessage, MediaType, WatchProgressEntry},
     state::AppState,
 };
+
+#[derive(serde::Deserialize)]
+struct WatchProgressPayload {
+    progress_percent: f32,
+    position_seconds: u32,
+    duration_seconds: u32,
+}
 
 pub fn build_router(state: AppState) -> Router {
     Router::new()
@@ -23,6 +30,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/meta/{id}", get(meta))
         .route("/api/search", get(search))
         .route("/api/streams/{id}", get(streams))
+        .route("/api/watch-progress", get(list_watch_progress))
+        .route(
+            "/api/watch-progress/{id}",
+            put(upsert_watch_progress).delete(remove_watch_progress),
+        )
         .with_state(state)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -41,6 +53,8 @@ async fn index() -> Json<ApiMessage> {
             "/api/meta/{id}",
             "/api/search?q=atlas",
             "/api/streams/{id}",
+            "/api/watch-progress",
+            "/api/watch-progress/{id}",
         ],
     })
 }
@@ -85,6 +99,41 @@ async fn streams(
     Path(id): Path<String>,
 ) -> Result<Json<Vec<crate::domain::StreamSource>>, StatusCode> {
     state.streams(&id).map(Json).ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn list_watch_progress(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<WatchProgressEntry>>, StatusCode> {
+    state
+        .watch_progress()
+        .map(Json)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+async fn upsert_watch_progress(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(payload): Json<WatchProgressPayload>,
+) -> StatusCode {
+    match state.save_watch_progress(
+        &id,
+        payload.progress_percent,
+        payload.position_seconds,
+        payload.duration_seconds,
+    ) {
+        Ok(()) => StatusCode::NO_CONTENT,
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+async fn remove_watch_progress(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> StatusCode {
+    match state.delete_watch_progress(&id) {
+        Ok(()) => StatusCode::NO_CONTENT,
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }
 
 fn parse_media_type(raw: &String) -> Option<MediaType> {
