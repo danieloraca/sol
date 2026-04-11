@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeSet,
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
     thread,
     time::{Duration, Instant},
@@ -391,14 +391,25 @@ pub struct AddonStore {
 
 impl Default for AddonStore {
     fn default() -> Self {
-        let path = std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join("sol.addons.json");
+        let path = std::env::var("SOL_ADDONS_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .join("sol.addons.json")
+            });
         Self { path }
     }
 }
 
 impl AddonStore {
+    pub fn with_path(path: impl AsRef<Path>) -> Self {
+        Self {
+            path: path.as_ref().to_path_buf(),
+        }
+    }
+
     pub fn load_settings(&self) -> StoredAddonSettings {
         let Some(raw) = fs::read_to_string(&self.path).ok() else {
             return StoredAddonSettings::default();
@@ -1857,10 +1868,13 @@ fn log_addon_timing(operation: &str, addon: &Arc<dyn SolAddon>, elapsed: Duratio
 
 #[cfg(test)]
 mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use reqwest::blocking::Client;
 
     use super::{
-        AddonRegistry, RemoteHttpAddon, RemoteManifest, RemoteResourceEntry, RemoteResourceObject,
+        AddonRegistry, AddonStore, RemoteHttpAddon, RemoteManifest, RemoteResourceEntry,
+        RemoteResourceObject,
         RemoteStream, dedupe_stream_sources, map_remote_stream_source,
         map_remote_stream_source_release, media_id_candidates, remote_addon_priority,
         stream_id_candidates_for_addon,
@@ -2100,5 +2114,29 @@ mod tests {
         };
 
         assert!(remote_addon_priority(&torbox) < remote_addon_priority(&other));
+    }
+
+    #[test]
+    fn addon_store_with_custom_path_reads_enabled_urls() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("sol-addons-test-{stamp}.json"));
+        let payload = r#"{
+          "remote_addons": [
+            { "manifest_url": "https://a.example/manifest.json", "enabled": true },
+            { "manifest_url": "https://b.example/manifest.json", "enabled": false }
+          ]
+        }"#;
+        std::fs::write(&path, payload).expect("test addon json should be written");
+
+        let store = AddonStore::with_path(&path);
+        assert_eq!(
+            store.enabled_urls(),
+            vec!["https://a.example/manifest.json".to_string()]
+        );
+
+        let _ = std::fs::remove_file(path);
     }
 }

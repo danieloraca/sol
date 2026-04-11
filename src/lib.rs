@@ -1,5 +1,8 @@
 pub mod addons;
 pub mod api;
+#[cfg(target_os = "android")]
+pub mod android_bridge;
+#[cfg(not(target_os = "android"))]
 pub mod desktop;
 pub mod domain;
 pub mod providers;

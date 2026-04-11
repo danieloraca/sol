@@ -5,6 +5,9 @@ edition = "2024"
 description = "Desktop-first Rust media app starter inspired by Stremio."
 default-run = "sol"
 
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 [build-dependencies]
 tauri-build = { version = "2" }
 
@@ -21,6 +24,9 @@ tokio = { version = "1.44.1", features = ["macros", "net", "rt-multi-thread"] }
 tower-http = { version = "0.6.2", features = ["cors", "trace"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21.1"
 
 [profile.release]
 lto = true

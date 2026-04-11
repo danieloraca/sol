@@ -126,6 +126,55 @@ You can inspect the current addon registry through:
 - Set `SOL_DB_PATH` if you want to use a shared path across devices/instances.
 - The desktop app and the HTTP API now use the same watch-progress store.
 
+## Android TV scaffold
+
+This repo now includes a starter Android TV app in `android-tv/` (Kotlin + Compose) and a Rust JNI bridge.
+
+What is included:
+
+- `android-tv/` Android app module with Leanback launcher manifest.
+- `src/android_bridge.rs` JNI exports for home feed, catalog, stream lookup, and addon management.
+- Rust library type includes `cdylib` so Android `.so` builds are possible.
+- `android-tv/scripts/build-native-android.sh` helper script to build/copy native libs.
+- `android-tv/app/src/main/assets/android.addons.seed.json` seed addon settings copied into app storage on first launch.
+
+### Prerequisites
+
+- Android Studio (latest stable).
+- Android SDK + NDK installed via Android Studio SDK Manager.
+- Rust Android target:
+
+```bash
+rustup target add aarch64-linux-android
+```
+
+- `cargo-ndk`:
+
+```bash
+cargo install cargo-ndk
+```
+
+### Build steps
+
+1. Build native Rust for Android:
+
+```bash
+./android-tv/scripts/build-native-android.sh
+```
+
+2. Open `android-tv/` in Android Studio.
+3. Let Gradle sync.
+4. Run the `app` target on your TV/emulator.
+
+On first run, the screen should show `Native bridge: sol native core ready` when the JNI library is loaded.
+
+### Android addon configuration
+
+- Android initializes addon settings in app-private storage at `<filesDir>/sol.addons.json`.
+- On first launch, the app seeds this file from `android-tv/app/src/main/assets/android.addons.seed.json`.
+- The native bridge now exposes install/enable/remove/reorder operations equivalent to desktop addon store operations.
+- If you update addon defaults for TV builds, update `android-tv/app/src/main/assets/android.addons.seed.json`.
+
 ## Suggested next steps
 
 1. Add real metadata providers and user identity so watch progress can be isolated per user.

@@ -1,0 +1,41 @@
+{
+  "remote_addons": [
+    {
+      "manifest_url": "https://stremio.torbox.app/df6655e0-2a7d-4ce3-a34e-91cc2384399f/manifest.json",
+      "enabled": true,
+      "id": "app.torbox.stremio",
+      "name": "TorBox",
+      "version": "1.1.2",
+      "capabilities": [
+        "catalog",
+        "meta",
+        "search",
+        "stream"
+      ]
+    },
+    {
+      "manifest_url": "https://aiometadata.viren070.me/stremio/42bcee58-9692-4b17-8614-c9a3bfaa2e40/manifest.json",
+      "enabled": true,
+      "id": "aio-metadata",
+      "name": "AIOMetadata",
+      "version": "1.34.0",
+      "capabilities": [
+        "catalog",
+        "meta",
+        "search",
+        "subtitles"
+      ]
+    },
+    {
+      "manifest_url": "https://aiostreamsfortheweebsstable.midnightignite.me/stremio/fa16fa96-2939-4853-9530-f51ceca05293/eyJpIjoiVnZ1eTZ3M2tQclU5NUUwc0h6NGVRUT09IiwiZSI6IjZRTGpQbDdwRS9YaVRqcHNxMjZGZ0hPcmdQbUtCc1hWaWEwcEhNbWhIeUU9IiwidCI6ImEifQ/manifest.json",
+      "enabled": true,
+      "id": "aiostreamsfortheweebsstable.midnightignite.me.fa16fa96-293",
+      "name": "AIOStreams",
+      "version": "2.26.0",
+      "capabilities": [
+        "catalog",
+        "stream"
+      ]
+    }
+  ]
+}
