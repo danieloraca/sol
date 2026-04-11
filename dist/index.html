@@ -111,6 +111,36 @@
             </div>
             <div class="settings-modal-body">
               <div class="section-heading">
+                <p class="eyebrow">Credentials</p>
+                <h2>Provider API Keys</h2>
+              </div>
+              <label class="search">
+                <span>TorBox API Key</span>
+                <input
+                  id="torbox-api-key"
+                  type="password"
+                  placeholder="Paste TORBOX_API_KEY"
+                  autocomplete="off"
+                />
+              </label>
+              <label class="search">
+                <span>TMDB Read Token</span>
+                <input
+                  id="tmdb-read-token"
+                  type="password"
+                  placeholder="Paste TMDB_API_READ_TOKEN"
+                  autocomplete="off"
+                />
+              </label>
+              <div class="control-buttons credentials-actions">
+                <button class="primary-button" id="save-provider-secrets" type="button">Save keys</button>
+                <button class="ghost-button" id="clear-torbox-key" type="button">Clear TorBox key</button>
+                <button class="ghost-button" id="clear-tmdb-key" type="button">Clear TMDB key</button>
+              </div>
+              <p id="secrets-status" class="meta"></p>
+              <p id="secrets-feedback" class="meta"></p>
+
+              <div class="section-heading">
                 <p class="eyebrow">Addons</p>
                 <h2>Install URLs</h2>
               </div>

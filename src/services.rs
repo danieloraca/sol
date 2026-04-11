@@ -7,9 +7,10 @@ use std::{
 use crate::{
     addons::{AddonRegistry, AddonStore, MoveDirection, RemoteHttpAddon, SolAddon},
     domain::{
-        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, MediaType, StreamLookup,
-        StreamSource, WatchProgressEntry,
+        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, MediaType, ProviderSecretStatus,
+        StreamLookup, StreamSource, WatchProgressEntry,
     },
+    secrets::SecretStore,
     storage::WatchProgressStore,
 };
 
@@ -19,6 +20,7 @@ pub struct AppServices {
     cache: Arc<RwLock<ServiceCache>>,
     store: AddonStore,
     watch_progress: WatchProgressStore,
+    secret_store: SecretStore,
 }
 
 const HOME_FEED_TTL: Duration = Duration::from_secs(20);
@@ -57,6 +59,10 @@ impl ServiceCache {
 impl AppServices {
     pub fn demo() -> Self {
         let store = AddonStore::default();
+        let secret_store = SecretStore;
+        if let Err(error) = secret_store.load_into_env() {
+            eprintln!("[secrets] {error}");
+        }
         let registry = AddonRegistry::from_manifest_urls(&store.enabled_urls());
         let watch_progress =
             WatchProgressStore::new().expect("watch progress store should initialize");
@@ -66,6 +72,7 @@ impl AppServices {
             cache: Arc::new(RwLock::new(ServiceCache::default())),
             store,
             watch_progress,
+            secret_store,
         }
     }
 
@@ -402,7 +409,49 @@ impl AppServices {
         self.watch_progress.delete(id)
     }
 
+    pub fn provider_secret_status(&self) -> Result<ProviderSecretStatus, String> {
+        self.secret_store.status()
+    }
+
+    pub fn save_provider_secrets(
+        &self,
+        torbox_api_key: Option<&str>,
+        tmdb_api_read_token: Option<&str>,
+    ) -> Result<ProviderSecretStatus, String> {
+        if let Some(value) = torbox_api_key {
+            if value.trim().is_empty() {
+                self.secret_store.clear_torbox_api_key()?;
+            } else {
+                self.secret_store.set_torbox_api_key(value)?;
+            }
+        }
+
+        if let Some(value) = tmdb_api_read_token {
+            if value.trim().is_empty() {
+                self.secret_store.clear_tmdb_api_read_token()?;
+            } else {
+                self.secret_store.set_tmdb_api_read_token(value)?;
+            }
+        }
+
+        self.reload_registry();
+        self.secret_store.status()
+    }
+
+    pub fn clear_provider_secret(&self, provider: &str) -> Result<ProviderSecretStatus, String> {
+        match provider.trim().to_ascii_lowercase().as_str() {
+            "torbox" => self.secret_store.clear_torbox_api_key()?,
+            "tmdb" => self.secret_store.clear_tmdb_api_read_token()?,
+            _ => return Err("Provider must be 'torbox' or 'tmdb'.".into()),
+        }
+        self.reload_registry();
+        self.secret_store.status()
+    }
+
     fn reload_registry(&self) {
+        if let Err(error) = self.secret_store.load_into_env() {
+            eprintln!("[secrets] {error}");
+        }
         let urls = self.store.enabled_urls();
         *self.addons.write().expect("addon registry write lock") =
             AddonRegistry::from_manifest_urls(&urls);

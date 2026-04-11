@@ -3,6 +3,7 @@ pub mod api;
 pub mod desktop;
 pub mod domain;
 pub mod providers;
+pub mod secrets;
 pub mod services;
 pub mod state;
 pub mod storage;

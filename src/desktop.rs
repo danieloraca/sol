@@ -4,8 +4,8 @@ use tauri::Manager;
 use crate::{
     addons::MoveDirection,
     domain::{
-        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, StreamLookup, StreamSource,
-        WatchProgressEntry,
+        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, ProviderSecretStatus,
+        StreamLookup, StreamSource, WatchProgressEntry,
     },
     state::AppState,
 };
@@ -188,6 +188,45 @@ fn delete_watch_progress(state: tauri::State<'_, AppState>, id: String) -> Resul
 }
 
 #[tauri::command]
+async fn get_provider_secret_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<ProviderSecretStatus, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.provider_secret_status())
+        .await
+        .map_err(|error| format!("Provider secret status task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn save_provider_secrets(
+    state: tauri::State<'_, AppState>,
+    torbox_api_key: Option<String>,
+    tmdb_api_read_token: Option<String>,
+    #[allow(non_snake_case)] torboxApiKey: Option<String>,
+    #[allow(non_snake_case)] tmdbApiReadToken: Option<String>,
+) -> Result<ProviderSecretStatus, String> {
+    let torbox_api_key = torbox_api_key.or(torboxApiKey);
+    let tmdb_api_read_token = tmdb_api_read_token.or(tmdbApiReadToken);
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state.save_provider_secrets(torbox_api_key.as_deref(), tmdb_api_read_token.as_deref())
+    })
+    .await
+    .map_err(|error| format!("Save provider secrets task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn clear_provider_secret(
+    state: tauri::State<'_, AppState>,
+    provider: String,
+) -> Result<ProviderSecretStatus, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.clear_provider_secret(&provider))
+        .await
+        .map_err(|error| format!("Clear provider secret task failed: {error}"))?
+}
+
+#[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
     let url = url.trim().to_string();
     if !(url.starts_with("http://") || url.starts_with("https://")) {
@@ -279,6 +318,9 @@ pub fn run() {
             get_watch_progress,
             save_watch_progress,
             delete_watch_progress,
+            get_provider_secret_status,
+            save_provider_secrets,
+            clear_provider_secret,
             open_external_url,
             toggle_window_maximize,
             toggle_window_fullscreen

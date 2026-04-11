@@ -330,6 +330,9 @@ body.is-player-fullscreen:not(.is-player-controls-visible) .player-video {
   align-items: end;
   justify-content: space-between;
   margin-bottom: 0;
+  padding: var(--surface-padding);
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
 }
 
 .is-hidden {
@@ -1703,6 +1706,10 @@ body.is-settings-open {
 .settings-modal-dialog :focus-visible {
   outline: 2px solid rgba(125, 249, 208, 0.72);
   outline-offset: 2px;
+}
+
+.credentials-actions {
+  margin-top: 2px;
 }
 
 .player-shell {

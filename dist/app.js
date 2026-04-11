@@ -22,6 +22,13 @@ const searchResultsSummaryEl = document.querySelector("#search-results-summary")
 const addonUrlEl = document.querySelector("#addon-url");
 const installAddonButtonEl = document.querySelector("#install-addon");
 const addonFeedbackEl = document.querySelector("#addon-feedback");
+const torboxApiKeyEl = document.querySelector("#torbox-api-key");
+const tmdbReadTokenEl = document.querySelector("#tmdb-read-token");
+const saveProviderSecretsButtonEl = document.querySelector("#save-provider-secrets");
+const clearTorboxKeyButtonEl = document.querySelector("#clear-torbox-key");
+const clearTmdbKeyButtonEl = document.querySelector("#clear-tmdb-key");
+const secretsStatusEl = document.querySelector("#secrets-status");
+const secretsFeedbackEl = document.querySelector("#secrets-feedback");
 const addonsListEl = document.querySelector("#addons-list");
 const addonDetailsEl = document.querySelector("#addon-details");
 const settingsToggleEl = document.querySelector("#settings-toggle");
@@ -83,6 +90,10 @@ let watchProgressById = {};
 let watchProgressLastSavedAt = new Map();
 let selectedSeriesSeason = null;
 let selectedSeriesEpisode = null;
+let providerSecretsStatus = {
+  torboxConfigured: false,
+  tmdbConfigured: false,
+};
 
 async function bootstrap() {
   if (!invoke) {
@@ -101,6 +112,9 @@ async function bootstrap() {
     if (homeFeed?.hero?.id) {
       void selectItem(homeFeed.hero.id);
     }
+  });
+  window.requestAnimationFrame(() => {
+    void refreshProviderSecretStatus();
   });
 
   searchEl.addEventListener("input", handleSearch);
@@ -167,6 +181,71 @@ async function bootstrap() {
     }
   });
 
+  saveProviderSecretsButtonEl?.addEventListener("click", async () => {
+    const torboxRaw = torboxApiKeyEl?.value?.trim() ?? "";
+    const tmdbRaw = tmdbReadTokenEl?.value?.trim() ?? "";
+    const torboxApiKey = torboxRaw === "********" ? "" : torboxRaw;
+    const tmdbApiReadToken = tmdbRaw === "********" ? "" : tmdbRaw;
+    if (!torboxApiKey && !tmdbApiReadToken) {
+      if (secretsFeedbackEl) {
+        secretsFeedbackEl.textContent = "No key changes to save.";
+      }
+      return;
+    }
+
+    if (secretsFeedbackEl) {
+      secretsFeedbackEl.textContent = "Saving provider keys...";
+    }
+    setSecretsActionsPending(true);
+
+    try {
+      const status = await invoke("save_provider_secrets", {
+        torboxApiKey: torboxApiKey || null,
+        tmdbApiReadToken: tmdbApiReadToken || null,
+        torbox_api_key: torboxApiKey || null,
+        tmdb_api_read_token: tmdbApiReadToken || null,
+      });
+      renderProviderSecretStatus(status);
+      const torboxSaved = Boolean(status?.torboxConfigured ?? status?.torbox_configured);
+      const tmdbSaved = Boolean(status?.tmdbConfigured ?? status?.tmdb_configured);
+      if (secretsFeedbackEl) {
+        const failed = [];
+        if (torboxApiKey && !torboxSaved) {
+          failed.push("TorBox");
+        }
+        if (tmdbApiReadToken && !tmdbSaved) {
+          failed.push("TMDB");
+        }
+        secretsFeedbackEl.textContent = failed.length === 0
+          ? "Provider keys saved."
+          : `Could not persist ${failed.join(" and ")} key(s). Check system keychain access.`;
+      }
+      reloadAddonDrivenViews().catch((error) => {
+        console.error("[settings] could not refresh addon-driven views:", error);
+      });
+    } catch (error) {
+      if (secretsFeedbackEl) {
+        secretsFeedbackEl.textContent = String(error);
+      }
+    } finally {
+      setSecretsActionsPending(false);
+    }
+  });
+
+  clearTorboxKeyButtonEl?.addEventListener("click", async () => {
+    await clearProviderSecret("torbox");
+  });
+
+  clearTmdbKeyButtonEl?.addEventListener("click", async () => {
+    await clearProviderSecret("tmdb");
+  });
+  torboxApiKeyEl?.addEventListener("input", () => {
+    updateSecretsActionAvailability();
+  });
+  tmdbReadTokenEl?.addEventListener("input", () => {
+    updateSecretsActionAvailability();
+  });
+
   if (!fullscreenListenerBound) {
     document.addEventListener("mousemove", () => {
       if (!isPlayerFullscreen || fullscreenPointerTicking) {
@@ -229,6 +308,115 @@ async function renderHome() {
   renderContinueWatchingRail();
   bindCatalogButtons(trendingEl);
   bindHeroButtons();
+}
+
+async function clearProviderSecret(provider) {
+  if (!invoke) {
+    return;
+  }
+
+  if (secretsFeedbackEl) {
+    secretsFeedbackEl.textContent = `Clearing ${provider} key...`;
+  }
+  setSecretsActionsPending(true);
+
+  try {
+    const status = await invoke("clear_provider_secret", { provider });
+    if (provider === "torbox" && torboxApiKeyEl) {
+      torboxApiKeyEl.value = "";
+    }
+    if (provider === "tmdb" && tmdbReadTokenEl) {
+      tmdbReadTokenEl.value = "";
+    }
+    renderProviderSecretStatus(status);
+    if (secretsFeedbackEl) {
+      secretsFeedbackEl.textContent = `${provider.toUpperCase()} key cleared.`;
+    }
+    reloadAddonDrivenViews().catch((error) => {
+      console.error("[settings] could not refresh addon-driven views:", error);
+    });
+  } catch (error) {
+    if (secretsFeedbackEl) {
+      secretsFeedbackEl.textContent = String(error);
+    }
+  } finally {
+    setSecretsActionsPending(false);
+  }
+}
+
+async function refreshProviderSecretStatus() {
+  if (!invoke) {
+    return;
+  }
+
+  setSecretsActionsPending(true);
+  try {
+    const status = await invoke("get_provider_secret_status");
+    renderProviderSecretStatus(status);
+    return status;
+  } catch (error) {
+    if (secretsStatusEl) {
+      secretsStatusEl.textContent = `Could not read key status: ${error}`;
+    }
+    return null;
+  } finally {
+    setSecretsActionsPending(false);
+  }
+}
+
+function renderProviderSecretStatus(status) {
+  if (!secretsStatusEl || !status) {
+    return;
+  }
+
+  const torboxConfigured = Boolean(
+    status.torboxConfigured ?? status.torbox_configured,
+  );
+  const tmdbConfigured = Boolean(
+    status.tmdbConfigured ?? status.tmdb_configured,
+  );
+  providerSecretsStatus = {
+    torboxConfigured,
+    tmdbConfigured,
+  };
+
+  secretsStatusEl.textContent =
+    `TorBox: ${torboxConfigured ? "saved" : "not set"} • `
+    + `TMDB: ${tmdbConfigured ? "saved" : "not set"}`;
+
+  if (torboxApiKeyEl) {
+    torboxApiKeyEl.value = torboxConfigured ? "********" : "";
+  }
+  if (tmdbReadTokenEl) {
+    tmdbReadTokenEl.value = tmdbConfigured ? "********" : "";
+  }
+  updateSecretsActionAvailability();
+}
+
+function setSecretsActionsPending(isPending) {
+  if (saveProviderSecretsButtonEl) {
+    saveProviderSecretsButtonEl.disabled =
+      isPending || !hasPendingProviderSecretInputChanges();
+  }
+  if (clearTorboxKeyButtonEl) {
+    clearTorboxKeyButtonEl.disabled =
+      isPending || !providerSecretsStatus.torboxConfigured;
+  }
+  if (clearTmdbKeyButtonEl) {
+    clearTmdbKeyButtonEl.disabled = isPending || !providerSecretsStatus.tmdbConfigured;
+  }
+}
+
+function hasPendingProviderSecretInputChanges() {
+  const torboxRaw = torboxApiKeyEl?.value?.trim() ?? "";
+  const tmdbRaw = tmdbReadTokenEl?.value?.trim() ?? "";
+  const torboxChanged = torboxRaw !== "" && torboxRaw !== "********";
+  const tmdbChanged = tmdbRaw !== "" && tmdbRaw !== "********";
+  return torboxChanged || tmdbChanged;
+}
+
+function updateSecretsActionAvailability() {
+  setSecretsActionsPending(false);
 }
 
 async function renderCatalog() {
@@ -625,6 +813,8 @@ function openSettingsModal() {
   settingsViewEl.classList.remove("is-hidden");
   settingsToggleEl?.setAttribute("aria-expanded", "true");
   document.body.classList.add("is-settings-open");
+  updateSecretsActionAvailability();
+  void refreshProviderSecretStatus();
 }
 
 function closeSettingsModal() {

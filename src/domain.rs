@@ -126,6 +126,12 @@ pub struct WatchProgressEntry {
     pub source_fingerprint: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderSecretStatus {
+    pub torbox_configured: bool,
+    pub tmdb_configured: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ApiMessage {
     pub name: String,

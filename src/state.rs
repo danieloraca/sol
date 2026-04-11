@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::{
     addons::MoveDirection,
     domain::{
-        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, MediaType, StreamLookup,
-        StreamSource, WatchProgressEntry,
+        AcquisitionResult, AddonDescriptor, HomeFeed, MediaItem, MediaType, ProviderSecretStatus,
+        StreamLookup, StreamSource, WatchProgressEntry,
     },
     services::AppServices,
 };
@@ -119,5 +119,22 @@ impl AppState {
 
     pub fn delete_watch_progress(&self, id: &str) -> Result<(), String> {
         self.services.delete_watch_progress(id)
+    }
+
+    pub fn provider_secret_status(&self) -> Result<ProviderSecretStatus, String> {
+        self.services.provider_secret_status()
+    }
+
+    pub fn save_provider_secrets(
+        &self,
+        torbox_api_key: Option<&str>,
+        tmdb_api_read_token: Option<&str>,
+    ) -> Result<ProviderSecretStatus, String> {
+        self.services
+            .save_provider_secrets(torbox_api_key, tmdb_api_read_token)
+    }
+
+    pub fn clear_provider_secret(&self, provider: &str) -> Result<ProviderSecretStatus, String> {
+        self.services.clear_provider_secret(provider)
     }
 }
