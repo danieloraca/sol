@@ -14,6 +14,7 @@ class MainActivity : ComponentActivity() {
       SolTvApp(
         nativeStatus = RustBridge.pingOrFallback(),
         homeFeedJson = RustBridge.homeFeedJsonOrFallback(),
+        catalogJson = RustBridge.catalogJsonOrFallback(),
       )
     }
   }
