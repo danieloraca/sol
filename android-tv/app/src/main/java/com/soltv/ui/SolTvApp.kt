@@ -1,8 +1,6 @@
 package com.soltv.ui
 
-import android.net.Uri
-import android.widget.MediaController
-import android.widget.VideoView
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -20,14 +18,19 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,6 +41,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.soltv.bridge.RustBridge
 import org.json.JSONArray
@@ -53,6 +60,15 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
   var playback by remember { mutableStateOf<PlaybackSelection?>(null) }
   var feedback by remember { mutableStateOf<String?>(null) }
 
+  fun startPlayback(item: MediaCard, streams: List<StreamInfo>, startIndex: Int) {
+    playback = PlaybackSelection(
+      title = item.title,
+      backdropUrl = item.backdropUrl ?: item.posterUrl,
+      streams = streams,
+      startIndex = startIndex.coerceIn(0, (streams.size - 1).coerceAtLeast(0)),
+    )
+  }
+
   fun openItem(item: MediaCard) {
     val lookup = parseStreamLookup(RustBridge.streamsJsonOrFallback(item.id))
     val streams = lookup.streams
@@ -63,11 +79,7 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
 
     feedback = null
     if (streams.size == 1) {
-      playback = PlaybackSelection(
-        title = item.title,
-        streamName = streams.first().name,
-        streamUrl = streams.first().url,
-      )
+      startPlayback(item, streams, 0)
     } else {
       selectedItemForSources = item
       selectedStreams = streams
@@ -92,12 +104,12 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
               selectedItemForSources = null
               selectedStreams = emptyList()
             },
-            onSelectStream = { stream ->
-              playback = PlaybackSelection(
-                title = selectedItemForSources!!.title,
-                streamName = stream.name,
-                streamUrl = stream.url,
-              )
+            onSelectStream = { index, _ ->
+              val item = selectedItemForSources ?: return@SourcePickerScreen
+              val streams = selectedStreams
+              selectedItemForSources = null
+              selectedStreams = emptyList()
+              startPlayback(item, streams, index)
             },
           )
         }
@@ -220,7 +232,7 @@ private fun SourcePickerScreen(
   item: MediaCard,
   streams: List<StreamInfo>,
   onBack: () -> Unit,
-  onSelectStream: (StreamInfo) -> Unit,
+  onSelectStream: (Int, StreamInfo) -> Unit,
 ) {
   BackHandler(onBack = onBack)
 
@@ -241,7 +253,8 @@ private fun SourcePickerScreen(
     }
 
     items(streams, key = { stream -> "${stream.name}:${stream.url}" }) { stream ->
-      SourceCard(stream = stream, onClick = { onSelectStream(stream) })
+      val index = streams.indexOf(stream)
+      SourceCard(stream = stream, onClick = { onSelectStream(index, stream) })
     }
   }
 }
@@ -280,33 +293,111 @@ private fun VideoViewPlayerScreen(
   selection: PlaybackSelection,
   onBack: () -> Unit,
 ) {
+  val logTag = "SolTvPlayer"
+  val context = LocalContext.current
+  var currentIndex by remember { mutableIntStateOf(selection.startIndex) }
   var playerError by remember { mutableStateOf<String?>(null) }
+  var statusText by remember { mutableStateOf("Loading stream...") }
+  var isBuffering by remember { mutableStateOf(true) }
+  val currentStream = selection.streams.getOrNull(currentIndex)
 
   BackHandler(onBack = onBack)
+  if (currentStream == null) {
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .background(Color.Black),
+    ) {
+      Text(
+        text = "No playable source selected. Press Back.",
+        modifier = Modifier.align(Alignment.Center),
+        color = Color(0xFFFFB4AB),
+      )
+    }
+    return
+  }
+
+  val exoPlayer = remember(currentStream.url) {
+    ExoPlayer.Builder(context).build().apply {
+      setMediaItem(MediaItem.fromUri(currentStream.url))
+      playWhenReady = true
+      prepare()
+    }
+  }
+
+  DisposableEffect(exoPlayer) {
+    val listener = object : Player.Listener {
+      override fun onPlaybackStateChanged(state: Int) {
+        val stateName = when (state) {
+          Player.STATE_IDLE -> "IDLE"
+          Player.STATE_BUFFERING -> "BUFFERING"
+          Player.STATE_READY -> "READY"
+          Player.STATE_ENDED -> "ENDED"
+          else -> "UNKNOWN($state)"
+        }
+        Log.d(logTag, "state=$stateName source=${currentStream.url}")
+        isBuffering = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
+        if (state == Player.STATE_READY) {
+          playerError = null
+          statusText = ""
+        }
+      }
+
+      override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+        Log.e(
+          logTag,
+          "playback_error code=${error.errorCodeName} message=${error.message} source=${currentStream.url}",
+          error,
+        )
+        playerError = error.errorCodeName
+      }
+    }
+    exoPlayer.addListener(listener)
+    onDispose {
+      exoPlayer.removeListener(listener)
+      exoPlayer.release()
+    }
+  }
+
+  LaunchedEffect(playerError, currentIndex) {
+    val hasError = !playerError.isNullOrBlank()
+    val hasNext = currentIndex + 1 < selection.streams.size
+    if (hasError && hasNext) {
+      statusText = "Trying source ${currentIndex + 2}/${selection.streams.size}..."
+      playerError = null
+      currentIndex += 1
+      isBuffering = true
+    }
+  }
 
   Box(modifier = Modifier.fillMaxSize()) {
+    if (!selection.backdropUrl.isNullOrBlank()) {
+      AsyncImage(
+        model = selection.backdropUrl,
+        contentDescription = "${selection.title} backdrop",
+        contentScale = ContentScale.Crop,
+        modifier = Modifier.fillMaxSize(),
+      )
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .background(Color(0x66000000)),
+      )
+    }
+
     AndroidView(
       modifier = Modifier.fillMaxSize(),
       factory = { viewContext ->
-        VideoView(viewContext).apply {
-          val controller = MediaController(viewContext)
-          controller.setAnchorView(this)
-          setMediaController(controller)
-
-          setOnPreparedListener { mediaPlayer ->
-            mediaPlayer.isLooping = false
-            playerError = null
-            start()
-          }
-
-          setOnErrorListener { _, what, extra ->
-            playerError = "what=$what extra=$extra"
-            true
-          }
-
-          setVideoURI(Uri.parse(selection.streamUrl))
-          requestFocus()
-          start()
+        PlayerView(viewContext).apply {
+          player = exoPlayer
+          useController = true
+          setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
+          setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+        }
+      },
+      update = { playerView ->
+        if (playerView.player !== exoPlayer) {
+          playerView.player = exoPlayer
         }
       },
     )
@@ -318,10 +409,37 @@ private fun VideoViewPlayerScreen(
         .background(Color(0xB3000000), RoundedCornerShape(10.dp))
         .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
-      Text(text = "${selection.title} • ${selection.streamName}", color = Color.White)
+      Text(
+        text = "${selection.title} • ${currentStream.name} (${currentIndex + 1}/${selection.streams.size})",
+        color = Color.White,
+      )
     }
 
-    if (!playerError.isNullOrBlank()) {
+    if (isBuffering || statusText.isNotBlank()) {
+      Box(
+        modifier = Modifier
+          .align(Alignment.Center)
+          .background(Color(0xB3000000), RoundedCornerShape(14.dp))
+          .padding(horizontal = 16.dp, vertical = 12.dp),
+      ) {
+        androidx.compose.foundation.layout.Row(
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          CircularProgressIndicator(
+            modifier = Modifier.width(20.dp).height(20.dp),
+            color = Color(0xFF76F0CF),
+            strokeWidth = 2.dp,
+          )
+          Text(
+            text = if (statusText.isNotBlank()) statusText else "Buffering...",
+            color = Color.White,
+          )
+        }
+      }
+    }
+
+    if (!playerError.isNullOrBlank() && currentIndex + 1 >= selection.streams.size) {
       Box(
         modifier = Modifier
           .align(Alignment.BottomStart)
@@ -330,7 +448,7 @@ private fun VideoViewPlayerScreen(
           .padding(horizontal = 12.dp, vertical = 8.dp),
       ) {
         Text(
-          text = "Playback issue ($playerError). Press Back.",
+          text = "Playback failed ($playerError). No more sources. Press Back.",
           color = Color(0xFFFFB4AB),
         )
       }
@@ -408,8 +526,9 @@ private data class MediaCard(
 
 private data class PlaybackSelection(
   val title: String,
-  val streamName: String,
-  val streamUrl: String,
+  val backdropUrl: String?,
+  val streams: List<StreamInfo>,
+  val startIndex: Int,
 )
 
 private data class StreamInfo(

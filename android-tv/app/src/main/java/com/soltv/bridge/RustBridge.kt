@@ -28,13 +28,24 @@ object RustBridge {
     if (initialized) return
     synchronized(this) {
       if (initialized) return
-      try {
-        val defaultAddons = context.assets.open("android.addons.seed.json")
+      val defaultAddons = try {
+        context.assets.open("android.addons.seed.json")
           .bufferedReader()
           .use { it.readText() }
-        nativeInitialize(context.filesDir.absolutePath, defaultAddons)
       } catch (_: Throwable) {
-        nativeInitialize(context.filesDir.absolutePath, "")
+        ""
+      }
+
+      try {
+        nativeInitialize(context.filesDir.absolutePath, defaultAddons)
+      } catch (_: UnsatisfiedLinkError) {
+        // Older native library without nativeInitialize; continue without hard fail.
+      } catch (_: Throwable) {
+        try {
+          nativeInitialize(context.filesDir.absolutePath, "")
+        } catch (_: Throwable) {
+          // Keep booting so older bridge methods can still run.
+        }
       }
       initialized = true
     }
