@@ -33,12 +33,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -52,6 +55,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.soltv.bridge.RustBridge
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -59,12 +65,14 @@ import org.json.JSONObject
 fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
   val homeFeed = parseHomeFeedSnapshot(homeFeedJson)
   val catalog = parseCatalogSnapshot(catalogJson)
+  val coroutineScope = rememberCoroutineScope()
 
   var selectedItemForDetail by remember { mutableStateOf<MediaCard?>(null) }
   var selectedItemForSources by remember { mutableStateOf<MediaCard?>(null) }
   var selectedStreams by remember { mutableStateOf<List<StreamInfo>>(emptyList()) }
   var playback by remember { mutableStateOf<PlaybackSelection?>(null) }
   var detailFeedback by remember { mutableStateOf<String?>(null) }
+  var isLoadingSources by remember { mutableStateOf(false) }
 
   fun startPlayback(item: MediaCard, streams: List<StreamInfo>, startIndex: Int) {
     playback = PlaybackSelection(
@@ -78,31 +86,60 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
   fun showDetail(item: MediaCard) {
     selectedItemForDetail = item
     detailFeedback = null
+    isLoadingSources = false
   }
 
-  fun loadStreams(item: MediaCard): StreamLookupSnapshot {
-    val lookup = parseStreamLookup(RustBridge.streamsJsonOrFallback(item.id))
-    val streams = lookup.streams
-    if (streams.isEmpty()) {
-      detailFeedback = lookup.message.ifBlank { "No playable stream found for ${item.title}." }
-    }
-    return lookup
+  fun fetchStreams(item: MediaCard): StreamLookupSnapshot {
+    return parseStreamLookup(RustBridge.streamsJsonOrFallback(item.id))
   }
 
   fun playItem(item: MediaCard) {
-    val lookup = loadStreams(item)
-    if (lookup.streams.isNotEmpty()) {
-      detailFeedback = null
-      startPlayback(item, lookup.streams, 0)
+    if (isLoadingSources) {
+      return
+    }
+    isLoadingSources = true
+    detailFeedback = "Checking playable sources..."
+    coroutineScope.launch {
+      val lookup = withContext(Dispatchers.IO) { fetchStreams(item) }
+      if (selectedItemForDetail?.id != item.id) {
+        return@launch
+      }
+      isLoadingSources = false
+      val inAppStreams = lookup.streams.filter { stream -> stream.isInAppPlayable() }
+      when {
+        inAppStreams.isNotEmpty() -> {
+          detailFeedback = null
+          startPlayback(item, inAppStreams, 0)
+        }
+        lookup.streams.isNotEmpty() -> {
+          detailFeedback = "No in-app playable source found. Open Sources to choose an external source."
+        }
+        else -> {
+          detailFeedback = lookup.message.ifBlank { "No playable stream found for ${item.title}." }
+        }
+      }
     }
   }
 
   fun chooseSource(item: MediaCard) {
-    val lookup = loadStreams(item)
-    if (lookup.streams.isNotEmpty()) {
-      detailFeedback = null
-      selectedItemForSources = item
-      selectedStreams = lookup.streams
+    if (isLoadingSources) {
+      return
+    }
+    isLoadingSources = true
+    detailFeedback = "Loading sources..."
+    coroutineScope.launch {
+      val lookup = withContext(Dispatchers.IO) { fetchStreams(item) }
+      if (selectedItemForDetail?.id != item.id) {
+        return@launch
+      }
+      isLoadingSources = false
+      if (lookup.streams.isNotEmpty()) {
+        detailFeedback = null
+        selectedItemForSources = item
+        selectedStreams = lookup.streams
+      } else {
+        detailFeedback = lookup.message.ifBlank { "No playable stream found for ${item.title}." }
+      }
     }
   }
 
@@ -127,9 +164,13 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
             onSelectStream = { index, _ ->
               val item = selectedItemForSources ?: return@SourcePickerScreen
               val streams = selectedStreams
+              val selectedStream = streams.getOrNull(index) ?: return@SourcePickerScreen
+              val inAppStreams = streams.filter { stream -> stream.isInAppPlayable() }
+              val playbackStreams = if (selectedStream.isInAppPlayable()) inAppStreams else listOf(selectedStream)
+              val playbackStartIndex = playbackStreams.indexOf(selectedStream).coerceAtLeast(0)
               selectedItemForSources = null
               selectedStreams = emptyList()
-              startPlayback(item, streams, index)
+              startPlayback(item, playbackStreams, playbackStartIndex)
             },
           )
         }
@@ -141,6 +182,7 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
             onBack = {
               selectedItemForDetail = null
               detailFeedback = null
+              isLoadingSources = false
             },
             onPlay = { playItem(selectedItemForDetail!!) },
             onChooseSource = { chooseSource(selectedItemForDetail!!) },
@@ -209,6 +251,11 @@ private fun DetailScreen(
   onChooseSource: () -> Unit,
 ) {
   BackHandler(onBack = onBack)
+  val playFocusRequester = remember { FocusRequester() }
+
+  LaunchedEffect(item.id) {
+    playFocusRequester.requestFocus()
+  }
 
   Box(
     modifier = Modifier
@@ -273,7 +320,12 @@ private fun DetailScreen(
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-          TvActionButton(label = "Play", isPrimary = true, onClick = onPlay)
+          TvActionButton(
+            label = "Play",
+            isPrimary = true,
+            modifier = Modifier.focusRequester(playFocusRequester),
+            onClick = onPlay,
+          )
           TvActionButton(label = "Sources", isPrimary = false, onClick = onChooseSource)
         }
 
@@ -324,7 +376,12 @@ private fun PosterArtwork(item: MediaCard) {
 }
 
 @Composable
-private fun TvActionButton(label: String, isPrimary: Boolean, onClick: () -> Unit) {
+private fun TvActionButton(
+  label: String,
+  isPrimary: Boolean,
+  modifier: Modifier = Modifier,
+  onClick: () -> Unit,
+) {
   var isFocused by remember { mutableStateOf(false) }
   val scale by animateFloatAsState(targetValue = if (isFocused) 1.05f else 1.0f, label = "buttonScale")
   val background = when {
@@ -336,7 +393,7 @@ private fun TvActionButton(label: String, isPrimary: Boolean, onClick: () -> Uni
   val foreground = if (isPrimary) Color(0xFF02120E) else Color.White
 
   Box(
-    modifier = Modifier
+    modifier = modifier
       .width(156.dp)
       .height(52.dp)
       .scale(scale)
@@ -749,8 +806,13 @@ private data class StreamInfo(
   val provider: String,
   val quality: String,
   val language: String,
+  val playbackKind: String,
   val playbackNote: String,
 ) {
+  fun isInAppPlayable(): Boolean {
+    return playbackKind.equals("embedded", ignoreCase = true)
+  }
+
   fun metadataLine(): String {
     return buildList {
       if (provider.isNotBlank()) {
@@ -862,6 +924,7 @@ private fun parseStreamLookup(rawJson: String): StreamLookupSnapshot {
             provider = stream.optString("provider").trim(),
             quality = stream.optString("quality").trim(),
             language = stream.optString("language").trim(),
+            playbackKind = stream.optString("playback_kind").trim(),
             playbackNote = stream.optString("playback_note").trim(),
           ),
         )
