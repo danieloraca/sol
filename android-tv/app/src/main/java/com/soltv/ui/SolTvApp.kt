@@ -9,10 +9,14 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -38,6 +42,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -55,10 +60,11 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
   val homeFeed = parseHomeFeedSnapshot(homeFeedJson)
   val catalog = parseCatalogSnapshot(catalogJson)
 
+  var selectedItemForDetail by remember { mutableStateOf<MediaCard?>(null) }
   var selectedItemForSources by remember { mutableStateOf<MediaCard?>(null) }
   var selectedStreams by remember { mutableStateOf<List<StreamInfo>>(emptyList()) }
   var playback by remember { mutableStateOf<PlaybackSelection?>(null) }
-  var feedback by remember { mutableStateOf<String?>(null) }
+  var detailFeedback by remember { mutableStateOf<String?>(null) }
 
   fun startPlayback(item: MediaCard, streams: List<StreamInfo>, startIndex: Int) {
     playback = PlaybackSelection(
@@ -69,20 +75,34 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
     )
   }
 
-  fun openItem(item: MediaCard) {
+  fun showDetail(item: MediaCard) {
+    selectedItemForDetail = item
+    detailFeedback = null
+  }
+
+  fun loadStreams(item: MediaCard): StreamLookupSnapshot {
     val lookup = parseStreamLookup(RustBridge.streamsJsonOrFallback(item.id))
     val streams = lookup.streams
     if (streams.isEmpty()) {
-      feedback = lookup.message.ifBlank { "No playable stream found for ${item.title}." }
-      return
+      detailFeedback = lookup.message.ifBlank { "No playable stream found for ${item.title}." }
     }
+    return lookup
+  }
 
-    feedback = null
-    if (streams.size == 1) {
-      startPlayback(item, streams, 0)
-    } else {
+  fun playItem(item: MediaCard) {
+    val lookup = loadStreams(item)
+    if (lookup.streams.isNotEmpty()) {
+      detailFeedback = null
+      startPlayback(item, lookup.streams, 0)
+    }
+  }
+
+  fun chooseSource(item: MediaCard) {
+    val lookup = loadStreams(item)
+    if (lookup.streams.isNotEmpty()) {
+      detailFeedback = null
       selectedItemForSources = item
-      selectedStreams = streams
+      selectedStreams = lookup.streams
     }
   }
 
@@ -114,6 +134,19 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
           )
         }
 
+        selectedItemForDetail != null -> {
+          DetailScreen(
+            item = selectedItemForDetail!!,
+            feedback = detailFeedback,
+            onBack = {
+              selectedItemForDetail = null
+              detailFeedback = null
+            },
+            onPlay = { playItem(selectedItemForDetail!!) },
+            onChooseSource = { chooseSource(selectedItemForDetail!!) },
+          )
+        }
+
         else -> {
           LazyColumn(
             modifier = Modifier
@@ -130,7 +163,7 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
 
             homeFeed.hero?.let { heroItem ->
               item {
-                HeroBanner(item = heroItem, onClick = { openItem(heroItem) })
+                HeroBanner(item = heroItem, onClick = { showDetail(heroItem) })
               }
             }
 
@@ -139,7 +172,7 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
                 Text(text = "Continue watching", style = MaterialTheme.typography.titleLarge)
               }
               item {
-                MediaRail(items = homeFeed.continueWatching, onClick = { openItem(it) })
+                MediaRail(items = homeFeed.continueWatching, onClick = { showDetail(it) })
               }
             }
 
@@ -148,7 +181,7 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
                 Text(text = "Trending", style = MaterialTheme.typography.titleLarge)
               }
               item {
-                MediaRail(items = homeFeed.trending, onClick = { openItem(it) })
+                MediaRail(items = homeFeed.trending, onClick = { showDetail(it) })
               }
             }
 
@@ -157,19 +190,174 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
                 Text(text = "Catalog", style = MaterialTheme.typography.titleLarge)
               }
               item {
-                MediaRail(items = catalog, onClick = { openItem(it) })
-              }
-            }
-
-            if (!feedback.isNullOrBlank()) {
-              item {
-                Text(text = feedback ?: "", color = Color(0xFFFFB4AB))
+                MediaRail(items = catalog, onClick = { showDetail(it) })
               }
             }
           }
         }
       }
     }
+  }
+}
+
+@Composable
+private fun DetailScreen(
+  item: MediaCard,
+  feedback: String?,
+  onBack: () -> Unit,
+  onPlay: () -> Unit,
+  onChooseSource: () -> Unit,
+) {
+  BackHandler(onBack = onBack)
+
+  Box(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Color(0xFF07131F)),
+  ) {
+    val imageUrl = item.backdropUrl ?: item.posterUrl
+    if (!imageUrl.isNullOrBlank()) {
+      AsyncImage(
+        model = imageUrl,
+        contentDescription = "${item.title} backdrop",
+        contentScale = ContentScale.Crop,
+        modifier = Modifier.fillMaxSize(),
+      )
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .background(Color(0xCC07131F)),
+      )
+    }
+
+    Row(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(horizontal = 48.dp, vertical = 42.dp),
+      horizontalArrangement = Arrangement.spacedBy(28.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      PosterArtwork(item = item)
+
+      Column(
+        modifier = Modifier
+          .weight(1f)
+          .padding(end = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+      ) {
+        Text(
+          text = item.title,
+          color = Color.White,
+          style = MaterialTheme.typography.headlineLarge,
+          maxLines = 2,
+          overflow = TextOverflow.Ellipsis,
+        )
+
+        val metadata = item.metadataLine()
+        if (metadata.isNotBlank()) {
+          Text(
+            text = metadata,
+            color = Color(0xFFB8C7D7),
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+
+        Text(
+          text = item.description.ifBlank { "No description available." },
+          color = Color(0xFFE0E8F0),
+          style = MaterialTheme.typography.bodyLarge,
+          maxLines = 5,
+          overflow = TextOverflow.Ellipsis,
+        )
+
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+          TvActionButton(label = "Play", isPrimary = true, onClick = onPlay)
+          TvActionButton(label = "Sources", isPrimary = false, onClick = onChooseSource)
+        }
+
+        if (!feedback.isNullOrBlank()) {
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(10.dp))
+              .background(Color(0xCC2A1B20))
+              .padding(horizontal = 14.dp, vertical = 12.dp),
+          ) {
+            Text(
+              text = feedback,
+              color = Color(0xFFFFDAD6),
+              style = MaterialTheme.typography.bodyMedium,
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun PosterArtwork(item: MediaCard) {
+  Box(
+    modifier = Modifier
+      .width(220.dp)
+      .height(330.dp)
+      .clip(RoundedCornerShape(14.dp))
+      .background(Color(0xFF1C2B3A)),
+  ) {
+    if (item.posterUrl.isNullOrBlank()) {
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .background(Color(0xFF2A3F55)),
+      )
+    } else {
+      AsyncImage(
+        model = item.posterUrl,
+        contentDescription = "${item.title} poster",
+        contentScale = ContentScale.Crop,
+        modifier = Modifier.fillMaxSize(),
+      )
+    }
+  }
+}
+
+@Composable
+private fun TvActionButton(label: String, isPrimary: Boolean, onClick: () -> Unit) {
+  var isFocused by remember { mutableStateOf(false) }
+  val scale by animateFloatAsState(targetValue = if (isFocused) 1.05f else 1.0f, label = "buttonScale")
+  val background = when {
+    isPrimary && isFocused -> Color(0xFF9AF7DC)
+    isPrimary -> Color(0xFF76F0CF)
+    isFocused -> Color(0xFF2A4B70)
+    else -> Color(0xFF152A3F)
+  }
+  val foreground = if (isPrimary) Color(0xFF02120E) else Color.White
+
+  Box(
+    modifier = Modifier
+      .width(156.dp)
+      .height(52.dp)
+      .scale(scale)
+      .clip(RoundedCornerShape(12.dp))
+      .background(background)
+      .onFocusChanged { state -> isFocused = state.isFocused }
+      .focusable()
+      .clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+      ) { onClick() },
+    contentAlignment = Alignment.Center,
+  ) {
+    Text(
+      text = label,
+      color = foreground,
+      style = MaterialTheme.typography.titleMedium,
+      textAlign = TextAlign.Center,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
   }
 }
 
@@ -263,8 +451,9 @@ private fun SourcePickerScreen(
 private fun SourceCard(stream: StreamInfo, onClick: () -> Unit) {
   var isFocused by remember { mutableStateOf(false) }
   val scale by animateFloatAsState(targetValue = if (isFocused) 1.02f else 1.0f, label = "sourceScale")
+  val metadata = stream.metadataLine()
 
-  Box(
+  Column(
     modifier = Modifier
       .fillMaxWidth()
       .scale(scale)
@@ -285,6 +474,17 @@ private fun SourceCard(stream: StreamInfo, onClick: () -> Unit) {
       maxLines = 2,
       overflow = TextOverflow.Ellipsis,
     )
+
+    if (metadata.isNotBlank()) {
+      Spacer(modifier = Modifier.size(4.dp))
+      Text(
+        text = metadata,
+        color = Color(0xFFB8C7D7),
+        style = MaterialTheme.typography.bodyMedium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
   }
 }
 
@@ -522,7 +722,19 @@ private data class MediaCard(
   val title: String,
   val posterUrl: String?,
   val backdropUrl: String?,
-)
+  val description: String,
+  val year: Int,
+  val genres: List<String>,
+) {
+  fun metadataLine(): String {
+    return buildList {
+      if (year > 0) {
+        add(year.toString())
+      }
+      addAll(genres.take(2))
+    }.joinToString(" • ")
+  }
+}
 
 private data class PlaybackSelection(
   val title: String,
@@ -534,7 +746,28 @@ private data class PlaybackSelection(
 private data class StreamInfo(
   val name: String,
   val url: String,
-)
+  val provider: String,
+  val quality: String,
+  val language: String,
+  val playbackNote: String,
+) {
+  fun metadataLine(): String {
+    return buildList {
+      if (provider.isNotBlank()) {
+        add(provider)
+      }
+      if (quality.isNotBlank()) {
+        add(quality)
+      }
+      if (language.isNotBlank()) {
+        add(language)
+      }
+      if (playbackNote.isNotBlank()) {
+        add(playbackNote)
+      }
+    }.joinToString(" • ")
+  }
+}
 
 private data class StreamLookupSnapshot(
   val message: String,
@@ -588,12 +821,24 @@ private fun parseMediaCard(obj: JSONObject): MediaCard? {
 
   val posterUrl = obj.optString("poster_url").trim().ifEmpty { null }
   val backdropUrl = obj.optString("backdrop_url").trim().ifEmpty { null }
+  val genres = buildList {
+    val array = obj.optJSONArray("genres") ?: JSONArray()
+    for (index in 0 until array.length()) {
+      val genre = array.optString(index).trim()
+      if (genre.isNotEmpty()) {
+        add(genre)
+      }
+    }
+  }
 
   return MediaCard(
     id = id,
     title = title,
     posterUrl = posterUrl,
     backdropUrl = backdropUrl,
+    description = obj.optString("description").trim(),
+    year = obj.optInt("year", 0),
+    genres = genres,
   )
 }
 
@@ -610,7 +855,16 @@ private fun parseStreamLookup(rawJson: String): StreamLookupSnapshot {
           continue
         }
         val name = stream.optString("name").trim().ifEmpty { "Stream" }
-        add(StreamInfo(name = name, url = url))
+        add(
+          StreamInfo(
+            name = name,
+            url = url,
+            provider = stream.optString("provider").trim(),
+            quality = stream.optString("quality").trim(),
+            language = stream.optString("language").trim(),
+            playbackNote = stream.optString("playback_note").trim(),
+          ),
+        )
       }
     }
 
