@@ -16,6 +16,8 @@ object RustBridge {
   external fun nativeInitialize(storageDir: String, defaultAddonsJson: String): String
   external fun nativePing(): String
   external fun nativeGetInstalledAddonsJson(): String
+  external fun nativeGetProviderSecretStatusJson(): String
+  external fun nativeSaveTorboxApiKey(apiKey: String): String
   external fun nativeInstallAddonUrl(manifestUrl: String): String
   external fun nativeSetRemoteAddonEnabled(manifestUrl: String, enabled: Boolean): String
   external fun nativeRemoveRemoteAddon(manifestUrl: String): String
@@ -76,6 +78,22 @@ object RustBridge {
       "[]"
     } catch (_: Throwable) {
       "[]"
+    }
+  }
+
+  fun providerSecretStatusJsonOrFallback(): String {
+    return try {
+      nativeGetProviderSecretStatusJson()
+    } catch (_: Throwable) {
+      """{"torbox_configured":false,"tmdb_configured":false}"""
+    }
+  }
+
+  fun saveTorboxApiKeyOrFallback(apiKey: String): String {
+    return try {
+      nativeSaveTorboxApiKey(apiKey)
+    } catch (_: Throwable) {
+      """{"ok":false,"error":"Native secret store unavailable."}"""
     }
   }
 

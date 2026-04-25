@@ -1,6 +1,7 @@
 package com.soltv.ui
 
 import android.util.Log
+import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -24,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,8 +49,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -61,12 +66,25 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
+private val playerControlKeyCodes = setOf(
+  KeyEvent.KEYCODE_DPAD_CENTER,
+  KeyEvent.KEYCODE_ENTER,
+  KeyEvent.KEYCODE_MEDIA_PLAY,
+  KeyEvent.KEYCODE_MEDIA_PAUSE,
+  KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+)
+
 @Composable
 fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
   val homeFeed = parseHomeFeedSnapshot(homeFeedJson)
   val catalog = parseCatalogSnapshot(catalogJson)
   val coroutineScope = rememberCoroutineScope()
 
+  var showSettings by remember { mutableStateOf(false) }
+  var providerSecretStatus by remember {
+    mutableStateOf(parseProviderSecretStatus(RustBridge.providerSecretStatusJsonOrFallback()))
+  }
+  var settingsFeedback by remember { mutableStateOf<String?>(null) }
   var selectedItemForDetail by remember { mutableStateOf<MediaCard?>(null) }
   var selectedItemForSources by remember { mutableStateOf<MediaCard?>(null) }
   var selectedStreams by remember { mutableStateOf<List<StreamInfo>>(emptyList()) }
@@ -153,6 +171,33 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
           )
         }
 
+        showSettings -> {
+          SettingsScreen(
+            secretStatus = providerSecretStatus,
+            feedback = settingsFeedback,
+            onBack = {
+              showSettings = false
+              settingsFeedback = null
+            },
+            onSaveTorboxKey = { apiKey ->
+              settingsFeedback = "Saving TorBox key..."
+              coroutineScope.launch {
+                val result = withContext(Dispatchers.IO) {
+                  RustBridge.saveTorboxApiKeyOrFallback(apiKey)
+                }
+                providerSecretStatus = parseProviderSecretStatus(result)
+                settingsFeedback = if (providerSecretStatus.torboxConfigured) {
+                  "TorBox key saved."
+                } else if (apiKey.isBlank()) {
+                  "TorBox key cleared."
+                } else {
+                  parseSecretError(result) ?: "Could not save TorBox key."
+                }
+              }
+            },
+          )
+        }
+
         selectedItemForSources != null -> {
           SourcePickerScreen(
             item = selectedItemForSources!!,
@@ -197,10 +242,27 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
           ) {
             item {
-              Text(text = "Sol for Android TV", style = MaterialTheme.typography.headlineLarge)
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Text(text = "Sol for Android TV", style = MaterialTheme.typography.headlineLarge)
+                TvActionButton(
+                  label = "Settings",
+                  isPrimary = false,
+                  onClick = {
+                    providerSecretStatus =
+                      parseProviderSecretStatus(RustBridge.providerSecretStatusJsonOrFallback())
+                    settingsFeedback = null
+                    showSettings = true
+                  },
+                )
+              }
             }
             item {
-              Text(text = "Native bridge: $nativeStatus")
+              val torboxStatus = if (providerSecretStatus.torboxConfigured) "TorBox ready" else "TorBox key missing"
+              Text(text = "Native bridge: $nativeStatus • $torboxStatus")
             }
 
             homeFeed.hero?.let { heroItem ->
@@ -236,6 +298,80 @@ fun SolTvApp(nativeStatus: String, homeFeedJson: String, catalogJson: String) {
               }
             }
           }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun SettingsScreen(
+  secretStatus: ProviderSecretStatus,
+  feedback: String?,
+  onBack: () -> Unit,
+  onSaveTorboxKey: (String) -> Unit,
+) {
+  BackHandler(onBack = onBack)
+  val saveFocusRequester = remember { FocusRequester() }
+  var torboxApiKey by remember { mutableStateOf("") }
+
+  LaunchedEffect(Unit) {
+    saveFocusRequester.requestFocus()
+  }
+
+  Box(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Color(0xFF06131F))
+      .padding(horizontal = 64.dp, vertical = 48.dp),
+  ) {
+    Column(
+      modifier = Modifier.width(760.dp),
+      verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+      Text(
+        text = "Settings",
+        color = Color.White,
+        style = MaterialTheme.typography.headlineLarge,
+      )
+      Text(
+        text = if (secretStatus.torboxConfigured) "TorBox API key saved" else "TorBox API key not saved",
+        color = if (secretStatus.torboxConfigured) Color(0xFF91F2D2) else Color(0xFFFFDAD6),
+        style = MaterialTheme.typography.titleMedium,
+      )
+      OutlinedTextField(
+        value = torboxApiKey,
+        onValueChange = { torboxApiKey = it },
+        label = { Text("TorBox API key") },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        modifier = Modifier.fillMaxWidth(),
+      )
+      Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        TvActionButton(
+          label = "Save",
+          isPrimary = true,
+          modifier = Modifier.focusRequester(saveFocusRequester),
+          onClick = { onSaveTorboxKey(torboxApiKey) },
+        )
+        TvActionButton(
+          label = "Clear",
+          isPrimary = false,
+          onClick = {
+            torboxApiKey = ""
+            onSaveTorboxKey("")
+          },
+        )
+        TvActionButton(label = "Back", isPrimary = false, onClick = onBack)
+      }
+      if (!feedback.isNullOrBlank()) {
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0x332B1B21), RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+          Text(text = feedback, color = Color.White)
         }
       }
     }
@@ -576,7 +712,15 @@ private fun VideoViewPlayerScreen(
 
   val exoPlayer = remember(currentStream.url) {
     ExoPlayer.Builder(context).build().apply {
+      setAudioAttributes(
+        AudioAttributes.Builder()
+          .setUsage(C.USAGE_MEDIA)
+          .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+          .build(),
+        true,
+      )
       setMediaItem(MediaItem.fromUri(currentStream.url))
+      volume = 1.0f
       playWhenReady = true
       prepare()
     }
@@ -648,14 +792,32 @@ private fun VideoViewPlayerScreen(
         PlayerView(viewContext).apply {
           player = exoPlayer
           useController = true
+          controllerAutoShow = true
+          controllerHideOnTouch = false
+          controllerShowTimeoutMs = 5000
           setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
           setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+          isFocusable = true
+          isFocusableInTouchMode = true
+          setOnClickListener {
+            showController()
+          }
+          setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN && keyCode in playerControlKeyCodes) {
+              showController()
+              false
+            } else {
+              false
+            }
+          }
+          requestFocus()
         }
       },
       update = { playerView ->
         if (playerView.player !== exoPlayer) {
           playerView.player = exoPlayer
         }
+        playerView.showController()
       },
     )
 
@@ -835,6 +997,31 @@ private data class StreamLookupSnapshot(
   val message: String,
   val streams: List<StreamInfo>,
 )
+
+private data class ProviderSecretStatus(
+  val torboxConfigured: Boolean,
+  val tmdbConfigured: Boolean,
+)
+
+private fun parseProviderSecretStatus(rawJson: String): ProviderSecretStatus {
+  return try {
+    val root = JSONObject(rawJson)
+    ProviderSecretStatus(
+      torboxConfigured = root.optBoolean("torbox_configured", false),
+      tmdbConfigured = root.optBoolean("tmdb_configured", false),
+    )
+  } catch (_: Throwable) {
+    ProviderSecretStatus(torboxConfigured = false, tmdbConfigured = false)
+  }
+}
+
+private fun parseSecretError(rawJson: String): String? {
+  return try {
+    JSONObject(rawJson).optString("error").trim().ifEmpty { null }
+  } catch (_: Throwable) {
+    null
+  }
+}
 
 private fun parseHomeFeedSnapshot(rawJson: String): HomeFeedSnapshot {
   return try {
